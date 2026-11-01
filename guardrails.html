@@ -415,8 +415,12 @@ var state = { tab: "plan" };
 
 function readURL() {
   var q = new URLSearchParams(location.search);
-  state.tab = q.get("tab") || "plan";
-  Object.keys(PARAMS).forEach(function (k) { state[k] = q.has(k) ? q.get(k) : String(PARAMS[k][3]); });
+  state.tab = ["plan", "sim", "about"].indexOf(q.get("tab")) >= 0 ? q.get("tab") : "plan";
+  Object.keys(PARAMS).forEach(function (k) {
+    var f = PARAMS[k], v = q.has(k) ? q.get(k) : String(f[3]);
+    if (f[2] === "sel" && !f[4].some(function (o) { return o[0] === v; })) v = String(f[3]);
+    state[k] = v;
+  });
 }
 function writeURL() {
   var q = new URLSearchParams();
@@ -441,7 +445,7 @@ function buildForm() {
       h += "</div>";
       var help = p[2] === "sel" ? null : p[4];
       if (help) h += '<div class="help">' + help + "</div>";
-      if (k === "ds") h += '<div class="row wide" id="customrow"><input type="file" id="csvfile" accept=".csv,text/csv"><div class="help">CSV columns: year, stocks, bonds, cash, inflation (nominal annual returns, as decimals or %). Saved in this browser.</div></div>';
+      if (k === "ds") h += '<div class="row wide" id="customrow"><input type="file" id="csvfile" accept=".csv,text/csv" aria-label="Custom returns CSV file"><div class="help">CSV columns: year, stocks, bonds, cash, inflation (nominal annual returns, as decimals or %). Saved in this browser.</div></div>';
     });
     h += "</fieldset>";
   });
@@ -514,6 +518,7 @@ function engineParams() {
     n: Math.max(10, Math.min(20000, num("n"))), rm: state.rm, bl: num("bl"), wrap: state.wrap === "1", seed: num("seed")
   };
   ["a1", "pa1", "ra", "p0", "contrib", "spend", "tgt", "fee", "gi", "gu", "gut", "gl", "glt", "n", "bl", "seed"].forEach(function (k) { if (isNaN(p[k])) errs.push("Field " + k + " is not a number."); });
+  if (!single) ["a2", "pa2"].forEach(function (k) { if (isNaN(p[k])) errs.push("Field " + k + " is not a number."); });
   p.ss.forEach(function (s) { if (isNaN(s.amt) || isNaN(s.age)) errs.push("Social Security fields must be numbers."); });
   if (p.alloc.s + p.alloc.b + p.alloc.c <= 0) errs.push("Allocation must add to more than 0%.");
   if (Math.abs(p.alloc.s + p.alloc.b + p.alloc.c - 100) > 0.01) errs.push("Note: allocation sums to " + (p.alloc.s + p.alloc.b + p.alloc.c) + "% – it is rescaled to 100%.");
@@ -552,7 +557,8 @@ function chart(el, o) {
   var x0 = xs[0], x1 = xs[n - 1]; if (o.bars) { x0 -= .5; x1 += .5; }
   var X = function (v) { return m.l + (v - x0) / ((x1 - x0) || 1) * (W - m.l - m.r); };
   var Y = function (v) { return m.t + (1 - (v - ymin) / ((ymax - ymin) || 1)) * (H - m.t - m.b); };
-  var s = '<svg viewBox="0 0 ' + W + " " + H + '" role="img">';
+  var hd = el.closest(".card") && el.closest(".card").querySelector("h3");
+  var s = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + esc(hd ? hd.textContent + " chart" : "Chart") + '">';
   yt.forEach(function (t) { s += '<line x1="' + m.l + '" x2="' + (W - m.r) + '" y1="' + Y(t) + '" y2="' + Y(t) + '" stroke="var(--grid)" stroke-width="1"/><text x="' + (m.l - 6) + '" y="' + (Y(t) + 4) + '" text-anchor="end">' + (o.yFmt || fm)(t) + "</text>"; });
   var xt = o.xTicks || niceTicks(xs[0], xs[n - 1], Math.max(3, Math.floor(W / 80)));
   xt.forEach(function (t) { if (t < xs[0] || t > xs[n - 1]) return; s += '<text x="' + X(t) + '" y="' + (H - m.b + 16) + '" text-anchor="middle">' + (o.xFmt ? o.xFmt(t) : t) + "</text>"; });
@@ -759,7 +765,7 @@ function renderAbout() {
 /* ---------------- main loop ---------------- */
 function setTab(t) {
   state.tab = t;
-  document.querySelectorAll("#tabs button").forEach(function (b) { b.classList.toggle("on", b.dataset.tab === t); });
+  document.querySelectorAll("#tabs button").forEach(function (b) { b.classList.toggle("on", b.dataset.tab === t); b.setAttribute("aria-pressed", b.dataset.tab === t); });
   ["plan", "sim", "about"].forEach(function (k) { document.getElementById("out-" + k).style.display = k === t ? "" : "none"; });
   writeURL(); refresh(true);
 }
@@ -769,9 +775,9 @@ function refresh(immediate) {
   document.getElementById("customrow").style.display = state.ds === "custom" ? "" : "none";
   var ep = engineParams(), data = dataset(); CUR_DATA = data;
   var errBox = document.getElementById("err");
-  var hard = ep.errs.filter(function (e) { return e.indexOf("Note:") !== 0; });
-  if (!data.length) hard.push("No historical data in the selected dataset/years" + (state.ds === "custom" ? " – load a CSV." : "."));
-  errBox.innerHTML = ep.errs.concat(data.length ? [] : ["No data."]).map(function (e) { return '<div class="' + (e.indexOf("Note:") === 0 ? "note" : "err") + '">' + esc(e) + "</div>"; }).join("");
+  var msgs = ep.errs.concat(data.length ? [] : ["No historical data in the selected dataset/years" + (state.ds === "custom" ? " – load a CSV." : ".")]);
+  var hard = msgs.filter(function (e) { return e.indexOf("Note:") !== 0; });
+  errBox.innerHTML = msgs.map(function (e) { return '<div class="' + (e.indexOf("Note:") === 0 ? "note" : "err") + '">' + esc(e) + "</div>"; }).join("");
   if (hard.length) return;
   if (state.tab === "plan") renderPlan(ep.p, data);
   else if (state.tab === "sim") {
