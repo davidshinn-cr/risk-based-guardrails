@@ -1,0 +1,798 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Risk-Based Guardrails Retirement Calculator</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface-0: #f4f3f0; --surface-1: #fcfcfb; --border: #e2e0da; --grid: #ebe9e4;
+  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
+  --accent: #2a78d6; --accent-ink: #1c5cab;
+  --seq-1: #cde2fb; --seq-2: #9ec5f4; --seq-4: #2a78d6; --seq-6: #184f95;
+  --series-2: #eb6834; --series-3: #1baf7a;
+  --good: #0ca30c; --critical: #d03b3b; --warning: #b77f00;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --surface-0: #121211; --surface-1: #1a1a19; --border: #33332f; --grid: #2a2a27;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --accent: #3987e5; --accent-ink: #86b6ef;
+    --seq-1: #18304f; --seq-2: #1c5cab; --seq-4: #3987e5; --seq-6: #9ec5f4;
+    --series-2: #d95926; --series-3: #199e70; --warning: #fab219;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--surface-0); color: var(--text-primary); }
+header { display: flex; align-items: center; gap: 12px; padding: 10px 18px; border-bottom: 1px solid var(--border); background: var(--surface-1); position: sticky; top: 0; z-index: 5; flex-wrap: wrap; }
+header h1 { font-size: 16px; margin: 0 12px 0 0; font-weight: 650; }
+.tabs { display: flex; gap: 4px; }
+.tabs button { border: 1px solid var(--border); background: transparent; color: var(--text-secondary); padding: 6px 12px; border-radius: 6px; cursor: pointer; font: inherit; }
+.tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.spacer { flex: 1; }
+button.btn { border: 1px solid var(--border); background: var(--surface-1); color: var(--text-primary); padding: 6px 12px; border-radius: 6px; cursor: pointer; font: inherit; }
+button.btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+main { display: grid; grid-template-columns: 340px 1fr; gap: 0; min-height: calc(100vh - 52px); }
+aside { border-right: 1px solid var(--border); background: var(--surface-1); padding: 10px 14px 40px; overflow-y: auto; max-height: calc(100vh - 52px); position: sticky; top: 52px; }
+fieldset { border: none; margin: 0 0 6px; padding: 0; }
+legend { font-weight: 650; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--text-secondary); padding: 10px 0 4px; }
+.row { display: grid; grid-template-columns: 1fr 120px; align-items: center; gap: 8px; margin: 3px 0; }
+.row.wide { grid-template-columns: 1fr; }
+.row label { color: var(--text-secondary); font-size: 13px; }
+.row label code { font-size: 11px; color: var(--text-muted); }
+input, select { width: 100%; padding: 4px 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--surface-0); color: var(--text-primary); font: inherit; font-variant-numeric: tabular-nums; }
+.help { font-size: 11.5px; color: var(--text-muted); margin: 0 0 4px; }
+section.out { padding: 16px 22px 60px; overflow-x: hidden; }
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; margin: 10px 0 16px; }
+.tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.tile .k { font-size: 12px; color: var(--text-secondary); }
+.tile .v { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; }
+.tile .s { font-size: 11.5px; color: var(--text-muted); margin-top: 2px; }
+.card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin: 0 0 14px; }
+.card h3 { margin: 0 0 2px; font-size: 14px; font-weight: 650; }
+.card .sub { color: var(--text-secondary); font-size: 12.5px; margin: 0 0 8px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 1250px) { .grid2 { grid-template-columns: 1fr; } }
+table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; font-size: 13px; }
+th, td { text-align: right; padding: 4px 8px; border-bottom: 1px solid var(--grid); }
+th:first-child, td:first-child { text-align: left; }
+th { color: var(--text-secondary); font-weight: 600; font-size: 12px; }
+.err { color: var(--critical); font-weight: 600; margin: 8px 0; }
+.note { color: var(--text-secondary); font-size: 12.5px; }
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart text { fill: var(--text-secondary); font-size: 11px; font-variant-numeric: tabular-nums; }
+.tip { position: absolute; pointer-events: none; background: var(--surface-1); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.12); white-space: nowrap; display: none; z-index: 3; font-variant-numeric: tabular-nums; }
+.tip b { font-weight: 650; }
+.legendrow { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--text-secondary); margin: 2px 0 6px; }
+.sw { display: inline-block; width: 12px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.progress { height: 3px; background: var(--accent); width: 0; transition: width .1s; position: fixed; top: 0; left: 0; z-index: 9; }
+.pill { display: inline-block; padding: 0 6px; border-radius: 9px; font-size: 11.5px; font-weight: 600; }
+.pill.up { color: var(--good); } .pill.down { color: var(--critical); } .pill.init { color: var(--accent-ink); }
+details summary { cursor: pointer; color: var(--text-secondary); font-size: 13px; margin: 6px 0; }
+.modehdr { font-size: 13px; font-weight: 650; color: var(--text-secondary); margin: 18px 0 0; text-transform: uppercase; letter-spacing: .04em; }
+</style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+<header>
+  <h1>Risk-Based Guardrails Calculator</h1>
+  <div class="tabs" id="tabs">
+    <button data-tab="plan">Planner (backtest)</button>
+    <button data-tab="sim">Guardrails simulation</button>
+    <button data-tab="about">How it works</button>
+  </div>
+  <div class="spacer"></div>
+  <span class="note" id="status"></span>
+  <button class="btn" id="copy">Copy link</button>
+  <button class="btn" id="reset">Reset</button>
+</header>
+<main>
+  <aside id="form"></aside>
+  <section class="out">
+    <div id="err"></div>
+    <div id="out-plan"></div>
+    <div id="out-sim"></div>
+    <div id="out-about"></div>
+  </section>
+</main>
+<div class="tip" id="tip"></div>
+
+<script id="data" type="application/json">{"shiller":[{"year":1871,"stocks":0.156383,"bonds":0.051543,"inf":0.015249},{"year":1872,"stocks":0.11163,"bonds":0.038786,"inf":0.022925},{"year":1873,"stocks":-0.025144,"bonds":0.065414,"inf":-0.044049},{"year":1874,"stocks":0.047177,"bonds":0.086428,"inf":-0.069523},{"year":1875,"stocks":0.054083,"bonds":0.08911,"inf":-0.057341},{"year":1876,"stocks":-0.141515,"bonds":0.057737,"inf":0.008295},{"year":1877,"stocks":-0.010669,"bonds":0.053975,"inf":-0.156307},{"year":1878,"stocks":0.162749,"bonds":0.053663,"inf":-0.102925},{"year":1879,"stocks":0.493461,"bonds":0.058835,"inf":0.206522},{"year":1880,"stocks":0.265671,"bonds":0.066662,"inf":-0.057057},{"year":1881,"stocks":0.002329,"bonds":0.044053,"inf":0.080679},{"year":1882,"stocks":0.036128,"bonds":0.036002,"inf":-0.018664},{"year":1883,"stocks":-0.054949,"bonds":0.037707,"inf":-0.076076},{"year":1884,"stocks":-0.123383,"bonds":0.044861,"inf":-0.102925},{"year":1885,"stocks":0.300495,"bonds":0.047965,"inf":-0.035024},{"year":1886,"stocks":0.119675,"bonds":0.022196,"inf":0.0},{"year":1887,"stocks":-0.006672,"bonds":0.023822,"inf":0.047559},{"year":1888,"stocks":0.033217,"bonds":0.055161,"inf":-0.0454},{"year":1889,"stocks":0.070799,"bonds":0.037481,"inf":-0.047559},{"year":1890,"stocks":-0.061584,"bonds":0.018782,"inf":0.024967},{"year":1891,"stocks":0.188803,"bonds":0.038402,"inf":-0.060256},{"year":1892,"stocks":0.061247,"bonds":0.024682,"inf":0.077763},{"year":1893,"stocks":-0.188051,"bonds":0.042151,"inf":-0.132911},{"year":1894,"stocks":0.036306,"bonds":0.057093,"inf":-0.040876},{"year":1895,"stocks":0.049954,"bonds":0.023959,"inf":0.013699},{"year":1896,"stocks":0.032381,"bonds":0.052845,"inf":-0.028529},{"year":1897,"stocks":0.203697,"bonds":0.038597,"inf":0.029366},{"year":1898,"stocks":0.293017,"bonds":0.054624,"inf":0.015015},{"year":1899,"stocks":0.036573,"bonds":0.027354,"inf":0.168639},{"year":1900,"stocks":0.208144,"bonds":0.036057,"inf":-0.024051},{"year":1901,"stocks":0.194404,"bonds":0.02492,"inf":0.024643},{"year":1902,"stocks":0.082768,"bonds":0.022542,"inf":0.096203},{"year":1903,"stocks":-0.171018,"bonds":0.025431,"inf":-0.04388},{"year":1904,"stocks":0.321568,"bonds":0.028096,"inf":0.022947},{"year":1905,"stocks":0.212791,"bonds":0.039408,"inf":0.0},{"year":1906,"stocks":0.0064,"bonds":0.015751,"inf":0.044864},{"year":1907,"stocks":-0.242103,"bonds":0.021537,"inf":-0.021469},{"year":1908,"stocks":0.394739,"bonds":0.048168,"inf":0.032333},{"year":1909,"stocks":0.161495,"bonds":0.02641,"inf":0.107383},{"year":1910,"stocks":-0.034032,"bonds":0.034299,"inf":-0.067677},{"year":1911,"stocks":0.035201,"bonds":0.038168,"inf":-0.010834},{"year":1912,"stocks":0.071707,"bonds":0.007125,"inf":0.073384},{"year":1913,"stocks":-0.04733,"bonds":0.068239,"inf":0.020408},{"year":1914,"stocks":-0.054161,"bonds":0.036172,"inf":0.01},{"year":1915,"stocks":0.311943,"bonds":0.058226,"inf":0.029703},{"year":1916,"stocks":0.081111,"bonds":0.027256,"inf":0.125},{"year":1917,"stocks":-0.186254,"bonds":0.017163,"inf":0.196581},{"year":1918,"stocks":0.182112,"bonds":0.05208,"inf":0.178571},{"year":1919,"stocks":0.196713,"bonds":0.010713,"inf":0.169697},{"year":1920,"stocks":-0.139564,"bonds":0.041841,"inf":-0.015544},{"year":1921,"stocks":0.101385,"bonds":0.114498,"inf":-0.110526},{"year":1922,"stocks":0.290682,"bonds":0.03919,"inf":-0.005917},{"year":1923,"stocks":0.054369,"bonds":0.068183,"inf":0.029762},{"year":1924,"stocks":0.27091,"bonds":0.057284,"inf":0.0},{"year":1925,"stocks":0.258237,"bonds":0.053743,"inf":0.034682},{"year":1926,"stocks":0.114991,"bonds":0.065197,"inf":-0.022346},{"year":1927,"stocks":0.37101,"bonds":0.034723,"inf":-0.011429},{"year":1928,"stocks":0.475713,"bonds":0.012285,"inf":-0.011561},{"year":1929,"stocks":-0.094594,"bonds":0.061965,"inf":0.0},{"year":1930,"stocks":-0.227246,"bonds":0.029353,"inf":-0.070175},{"year":1931,"stocks":-0.441963,"bonds":0.006935,"inf":-0.100629},{"year":1932,"stocks":-0.058116,"bonds":0.067711,"inf":-0.097902},{"year":1933,"stocks":0.567454,"bonds":0.049225,"inf":0.023256},{"year":1934,"stocks":-0.080121,"bonds":0.059266,"inf":0.030303},{"year":1935,"stocks":0.549299,"bonds":0.040004,"inf":0.014706},{"year":1936,"stocks":0.325451,"bonds":0.024324,"inf":0.021739},{"year":1937,"stocks":-0.321062,"bonds":0.037235,"inf":0.007092},{"year":1938,"stocks":0.174993,"bonds":0.042924,"inf":-0.014085},{"year":1939,"stocks":0.029804,"bonds":0.0367,"inf":-0.007143},{"year":1940,"stocks":-0.089142,"bonds":0.044911,"inf":0.014388},{"year":1941,"stocks":-0.090929,"bonds":-0.022846,"inf":0.113475},{"year":1942,"stocks":0.217384,"bonds":0.024032,"inf":0.076433},{"year":1943,"stocks":0.236012,"bonds":0.024143,"inf":0.029586},{"year":1944,"stocks":0.196681,"bonds":0.034418,"inf":0.022989},{"year":1945,"stocks":0.393458,"bonds":0.039399,"inf":0.022472},{"year":1946,"stocks":-0.120538,"bonds":0.017018,"inf":0.181319},{"year":1947,"stocks":0.025611,"bonds":0.006755,"inf":0.102326},{"year":1948,"stocks":0.095076,"bonds":0.035751,"inf":0.012658},{"year":1949,"stocks":0.174821,"bonds":0.022493,"inf":-0.020833},{"year":1950,"stocks":0.34383,"bonds":0.002575,"inf":0.080851},{"year":1951,"stocks":0.219161,"bonds":0.016835,"inf":0.043307},{"year":1952,"stocks":0.146899,"bonds":0.014731,"inf":0.003774},{"year":1953,"stocks":0.030097,"bonds":0.059946,"inf":0.011278},{"year":1954,"stocks":0.467921,"bonds":0.012751,"inf":-0.007435},{"year":1955,"stocks":0.289089,"bonds":0.003262,"inf":0.003745},{"year":1956,"stocks":0.06865,"bonds":-0.015257,"inf":0.029851},{"year":1957,"stocks":-0.058096,"bonds":0.068927,"inf":0.036232},{"year":1958,"stocks":0.403844,"bonds":-0.042719,"inf":0.013986},{"year":1959,"stocks":0.076305,"bonds":-0.012057,"inf":0.010345},{"year":1960,"stocks":0.065327,"bonds":0.116806,"inf":0.017065},{"year":1961,"stocks":0.190854,"bonds":0.01954,"inf":0.006711},{"year":1962,"stocks":-0.025947,"bonds":0.06126,"inf":0.013333},{"year":1963,"stocks":0.212099,"bonds":0.012707,"inf":0.016447},{"year":1964,"stocks":0.159758,"bonds":0.041008,"inf":0.009709},{"year":1965,"stocks":0.115994,"bonds":0.009684,"inf":0.019231},{"year":1966,"stocks":-0.064147,"bonds":0.052379,"inf":0.034591},{"year":1967,"stocks":0.161169,"bonds":-0.02183,"inf":0.036474},{"year":1968,"stocks":0.106159,"bonds":0.018677,"inf":0.043988},{"year":1969,"stocks":-0.085532,"bonds":-0.054525,"inf":0.061798},{"year":1970,"stocks":0.075437,"bonds":0.196895,"inf":0.05291},{"year":1971,"stocks":0.140003,"bonds":0.085049,"inf":0.032663},{"year":1972,"stocks":0.178641,"bonds":0.025288,"inf":0.036496},{"year":1973,"stocks":-0.162883,"bonds":0.031049,"inf":0.093897},{"year":1974,"stocks":-0.210751,"bonds":0.040814,"inf":0.118026},{"year":1975,"stocks":0.391907,"bonds":0.064868,"inf":0.067179},{"year":1976,"stocks":0.112093,"bonds":0.117887,"inf":0.052158},{"year":1977,"stocks":-0.090407,"bonds":0.023387,"inf":0.068376},{"year":1978,"stocks":0.162352,"bonds":0.009878,"inf":0.0928},{"year":1979,"stocks":0.171154,"bonds":-0.010124,"inf":0.139092},{"year":1980,"stocks":0.260202,"bonds":0.010256,"inf":0.118252},{"year":1981,"stocks":-0.072209,"bonds":0.031057,"inf":0.083908},{"year":1982,"stocks":0.301138,"bonds":0.4233,"inf":0.037116},{"year":1983,"stocks":0.203721,"bonds":0.040772,"inf":0.041922},{"year":1984,"stocks":0.079156,"bonds":0.149593,"inf":0.035329},{"year":1985,"stocks":0.263861,"bonds":0.266331,"inf":0.038863},{"year":1986,"stocks":0.313966,"bonds":0.238974,"inf":0.014599},{"year":1987,"stocks":-0.023927,"bonds":-0.023682,"inf":0.040468},{"year":1988,"stocks":0.17925,"bonds":0.062769,"inf":0.046672},{"year":1989,"stocks":0.229694,"bonds":0.15118,"inf":0.052023},{"year":1990,"stocks":-0.008515,"bonds":0.097165,"inf":0.056515},{"year":1991,"stocks":0.319522,"bonds":0.161423,"inf":0.026003},{"year":1992,"stocks":0.077388,"bonds":0.104636,"inf":0.032585},{"year":1993,"stocks":0.117056,"bonds":0.126879,"inf":0.025245},{"year":1994,"stocks":0.011523,"bonds":-0.070136,"inf":0.028044},{"year":1995,"stocks":0.353152,"bonds":0.239682,"inf":0.027279},{"year":1996,"stocks":0.273633,"bonds":-0.003804,"inf":0.03044},{"year":1997,"stocks":0.279097,"bonds":0.148483,"inf":0.015713},{"year":1998,"stocks":0.31508,"bonds":0.120968,"inf":0.016708},{"year":1999,"stocks":0.155757,"bonds":-0.084104,"inf":0.027389},{"year":2000,"stocks":-0.052107,"bonds":0.184215,"inf":0.037322},{"year":2001,"stocks":-0.134709,"bonds":0.060335,"inf":0.011422},{"year":2002,"stocks":-0.20128,"bonds":0.130507,"inf":0.025974},{"year":2003,"stocks":0.285689,"bonds":0.031319,"inf":0.019263},{"year":2004,"stocks":0.060438,"bonds":0.037011,"inf":0.029698},{"year":2005,"stocks":0.101211,"bonds":0.026985,"inf":0.039853},{"year":2006,"stocks":0.133759,"bonds":0.021239,"inf":0.020777},{"year":2007,"stocks":-0.014394,"bonds":0.13473,"inf":0.042782},{"year":2008,"stocks":-0.35629,"bonds":0.146626,"inf":0.000284},{"year":2009,"stocks":0.333247,"bonds":-0.067497,"inf":0.026286},{"year":2010,"stocks":0.163817,"bonds":0.060726,"inf":0.016291},{"year":2011,"stocks":0.033823,"bonds":0.160197,"inf":0.029243},{"year":2012,"stocks":0.161927,"bonds":0.023232,"inf":0.015971},{"year":2013,"stocks":0.255843,"bonds":-0.05827,"inf":0.015807},{"year":2014,"stocks":0.134571,"bonds":0.116869,"inf":-0.000898},{"year":2015,"stocks":-0.034561,"bonds":0.002288,"inf":0.013735},{"year":2016,"stocks":0.211016,"bonds":-0.012151,"inf":0.024987},{"year":2017,"stocks":0.2498,"bonds":0.010106,"inf":0.020713},{"year":2018,"stocks":-0.047619,"bonds":0.017689,"inf":0.015492},{"year":2019,"stocks":0.281337,"bonds":0.109581,"inf":0.02487},{"year":2020,"stocks":0.178662,"bonds":0.072821,"inf":0.013994},{"year":2021,"stocks":0.22208,"bonds":-0.047487,"inf":0.074815},{"year":2022,"stocks":-0.120211,"bonds":-0.117325,"inf":0.064094}],"dam":[{"year":1928,"stocks":0.4381,"bonds":0.0084,"cash":0.0308,"inf":-0.011561},{"year":1929,"stocks":-0.083,"bonds":0.042,"cash":0.0316,"inf":0.005848},{"year":1930,"stocks":-0.2512,"bonds":0.0454,"cash":0.0455,"inf":-0.063953},{"year":1931,"stocks":-0.4384,"bonds":-0.0256,"cash":0.0231,"inf":-0.093168},{"year":1932,"stocks":-0.0864,"bonds":0.0879,"cash":0.0107,"inf":-0.10274},{"year":1933,"stocks":0.4998,"bonds":0.0186,"cash":0.0096,"inf":0.007634},{"year":1934,"stocks":-0.0119,"bonds":0.0796,"cash":0.0028,"inf":0.015152},{"year":1935,"stocks":0.4674,"bonds":0.0447,"cash":0.0017,"inf":0.029851},{"year":1936,"stocks":0.3194,"bonds":0.0502,"cash":0.0017,"inf":0.014493},{"year":1937,"stocks":-0.3534,"bonds":0.0138,"cash":0.0028,"inf":0.028571},{"year":1938,"stocks":0.2928,"bonds":0.0421,"cash":0.0007,"inf":-0.027778},{"year":1939,"stocks":-0.011,"bonds":0.0441,"cash":0.0005,"inf":0.0},{"year":1940,"stocks":-0.1067,"bonds":0.054,"cash":0.0004,"inf":0.007143},{"year":1941,"stocks":-0.1277,"bonds":-0.0202,"cash":0.0013,"inf":0.099291},{"year":1942,"stocks":0.1917,"bonds":0.0229,"cash":0.0034,"inf":0.090323},{"year":1943,"stocks":0.2506,"bonds":0.0249,"cash":0.0038,"inf":0.029586},{"year":1944,"stocks":0.1903,"bonds":0.0258,"cash":0.0038,"inf":0.022989},{"year":1945,"stocks":0.3582,"bonds":0.038,"cash":0.0038,"inf":0.022472},{"year":1946,"stocks":-0.0843,"bonds":0.0313,"cash":0.0038,"inf":0.181319},{"year":1947,"stocks":0.052,"bonds":0.0092,"cash":0.006,"inf":0.088372},{"year":1948,"stocks":0.057,"bonds":0.0195,"cash":0.0105,"inf":0.029915},{"year":1949,"stocks":0.183,"bonds":0.0466,"cash":0.0112,"inf":-0.020747},{"year":1950,"stocks":0.3081,"bonds":0.0043,"cash":0.012,"inf":0.059322},{"year":1951,"stocks":0.2368,"bonds":-0.003,"cash":0.0152,"inf":0.06},{"year":1952,"stocks":0.1815,"bonds":0.0227,"cash":0.0172,"inf":0.007547},{"year":1953,"stocks":-0.0121,"bonds":0.0414,"cash":0.0189,"inf":0.007491},{"year":1954,"stocks":0.5256,"bonds":0.0329,"cash":0.0094,"inf":-0.007435},{"year":1955,"stocks":0.326,"bonds":-0.0134,"cash":0.0172,"inf":0.003745},{"year":1956,"stocks":0.0744,"bonds":-0.0226,"cash":0.0262,"inf":0.029851},{"year":1957,"stocks":-0.1046,"bonds":0.068,"cash":0.0322,"inf":0.028986},{"year":1958,"stocks":0.4372,"bonds":-0.021,"cash":0.0177,"inf":0.017606},{"year":1959,"stocks":0.1206,"bonds":-0.0265,"cash":0.0339,"inf":0.017301},{"year":1960,"stocks":0.0034,"bonds":0.1164,"cash":0.0287,"inf":0.013605},{"year":1961,"stocks":0.2664,"bonds":0.0206,"cash":0.0235,"inf":0.006711},{"year":1962,"stocks":-0.0881,"bonds":0.0569,"cash":0.0277,"inf":0.013333},{"year":1963,"stocks":0.2261,"bonds":0.0168,"cash":0.0316,"inf":0.016447},{"year":1964,"stocks":0.1642,"bonds":0.0373,"cash":0.0355,"inf":0.009709},{"year":1965,"stocks":0.124,"bonds":0.0072,"cash":0.0395,"inf":0.019231},{"year":1966,"stocks":-0.0997,"bonds":0.0291,"cash":0.0486,"inf":0.034591},{"year":1967,"stocks":0.238,"bonds":-0.0158,"cash":0.0429,"inf":0.030395},{"year":1968,"stocks":0.1081,"bonds":0.0327,"cash":0.0534,"inf":0.047198},{"year":1969,"stocks":-0.0824,"bonds":-0.0501,"cash":0.0667,"inf":0.061972},{"year":1970,"stocks":0.0356,"bonds":0.1675,"cash":0.0639,"inf":0.055703},{"year":1971,"stocks":0.1422,"bonds":0.0979,"cash":0.0433,"inf":0.032663},{"year":1972,"stocks":0.1876,"bonds":0.0282,"cash":0.0406,"inf":0.034063},{"year":1973,"stocks":-0.1431,"bonds":0.0366,"cash":0.0704,"inf":0.087059},{"year":1974,"stocks":-0.259,"bonds":0.0199,"cash":0.0785,"inf":0.123377},{"year":1975,"stocks":0.37,"bonds":0.0361,"cash":0.0579,"inf":0.069364},{"year":1976,"stocks":0.2383,"bonds":0.1598,"cash":0.0498,"inf":0.048649},{"year":1977,"stocks":-0.0698,"bonds":0.0129,"cash":0.0526,"inf":0.06701},{"year":1978,"stocks":0.0651,"bonds":-0.0078,"cash":0.0718,"inf":0.090177},{"year":1979,"stocks":0.1852,"bonds":0.0067,"cash":0.1005,"inf":0.132939},{"year":1980,"stocks":0.3174,"bonds":-0.0299,"cash":0.1139,"inf":0.125163},{"year":1981,"stocks":-0.047,"bonds":0.082,"cash":0.1404,"inf":0.089224},{"year":1982,"stocks":0.2042,"bonds":0.3281,"cash":0.1109,"inf":0.038298},{"year":1983,"stocks":0.2234,"bonds":0.032,"cash":0.0895,"inf":0.03791},{"year":1984,"stocks":0.0615,"bonds":0.1373,"cash":0.0992,"inf":0.039487},{"year":1985,"stocks":0.3124,"bonds":0.2571,"cash":0.0772,"inf":0.037987},{"year":1986,"stocks":0.1849,"bonds":0.2428,"cash":0.0615,"inf":0.010979},{"year":1987,"stocks":0.0581,"bonds":-0.0496,"cash":0.0596,"inf":0.044344},{"year":1988,"stocks":0.1654,"bonds":0.0822,"cash":0.0689,"inf":0.044194},{"year":1989,"stocks":0.3148,"bonds":0.1769,"cash":0.0839,"inf":0.046473},{"year":1990,"stocks":-0.0306,"bonds":0.0624,"cash":0.0775,"inf":0.061063},{"year":1991,"stocks":0.3023,"bonds":0.15,"cash":0.0554,"inf":0.030643},{"year":1992,"stocks":0.0749,"bonds":0.0936,"cash":0.0351,"inf":0.029007},{"year":1993,"stocks":0.0997,"bonds":0.1421,"cash":0.0307,"inf":0.027484},{"year":1994,"stocks":0.0133,"bonds":-0.0804,"cash":0.0437,"inf":0.026749},{"year":1995,"stocks":0.372,"bonds":0.2348,"cash":0.0566,"inf":0.025384},{"year":1996,"stocks":0.2268,"bonds":0.0143,"cash":0.0515,"inf":0.033225},{"year":1997,"stocks":0.331,"bonds":0.0994,"cash":0.052,"inf":0.017024},{"year":1998,"stocks":0.2834,"bonds":0.1492,"cash":0.0491,"inf":0.016119},{"year":1999,"stocks":0.2089,"bonds":-0.0825,"cash":0.0478,"inf":0.026846},{"year":2000,"stocks":-0.0903,"bonds":0.1666,"cash":0.06,"inf":0.033868},{"year":2001,"stocks":-0.1185,"bonds":0.0557,"cash":0.0348,"inf":0.015517},{"year":2002,"stocks":-0.2197,"bonds":0.1512,"cash":0.0164,"inf":0.023769},{"year":2003,"stocks":0.2836,"bonds":0.0038,"cash":0.0103,"inf":0.018795},{"year":2004,"stocks":0.1074,"bonds":0.0449,"cash":0.014,"inf":0.032556},{"year":2005,"stocks":0.0483,"bonds":0.0287,"cash":0.0322,"inf":0.034157},{"year":2006,"stocks":0.1561,"bonds":0.0196,"cash":0.0485,"inf":0.025407},{"year":2007,"stocks":0.0548,"bonds":0.1021,"cash":0.0448,"inf":0.040833},{"year":2008,"stocks":-0.3655,"bonds":0.201,"cash":0.014,"inf":0.000905},{"year":2009,"stocks":0.2594,"bonds":-0.1112,"cash":0.0015,"inf":0.027208},{"year":2010,"stocks":0.1482,"bonds":0.0846,"cash":0.0014,"inf":0.014957},{"year":2011,"stocks":0.021,"bonds":0.1604,"cash":0.0005,"inf":0.02961},{"year":2012,"stocks":0.1589,"bonds":0.0297,"cash":0.0009,"inf":0.017415},{"year":2013,"stocks":0.3215,"bonds":-0.091,"cash":0.0006,"inf":0.015026},{"year":2014,"stocks":0.1352,"bonds":0.1075,"cash":0.0003,"inf":0.007552},{"year":2015,"stocks":0.0138,"bonds":0.0128,"cash":0.0005,"inf":0.007325},{"year":2016,"stocks":0.1177,"bonds":0.0069,"cash":0.0032,"inf":0.020716},{"year":2017,"stocks":0.2161,"bonds":0.028,"cash":0.0095,"inf":0.021083},{"year":2018,"stocks":-0.0423,"bonds":-0.0002,"cash":0.0197,"inf":0.019106},{"year":2019,"stocks":0.3121,"bonds":0.0964,"cash":0.0211,"inf":0.022848},{"year":2020,"stocks":0.1802,"bonds":0.1133,"cash":0.0036,"inf":0.01362},{"year":2021,"stocks":0.2847,"bonds":-0.0442,"cash":0.0004,"inf":0.070373},{"year":2022,"stocks":-0.1804,"bonds":-0.1783,"cash":0.0209,"inf":0.064562},{"year":2023,"stocks":0.2606,"bonds":0.0388,"cash":0.0528,"inf":0.033521},{"year":2024,"stocks":0.2488,"bonds":-0.0164,"cash":0.0518,"inf":0.028881},{"year":2025,"stocks":0.1778,"bonds":0.078,"cash":0.0421,"inf":0.026771}]}</script>
+<script id="engine-src">/* Retirement engine. All amounts are REAL (today's dollars); inflation is handled by
+   converting historical nominal returns to real returns. Withdrawals/contributions occur at
+   the start of each year, then the portfolio earns that year's return.
+
+   Key trick: with spending = L * a[k] + c[k] (L = adjustable spending level), the "can I fund
+   every year?" test on one historical sequence is linear in L and in the starting portfolio P,
+   so the critical spending level (or critical portfolio) per sequence is computed exactly in O(H).
+   Success rate at (P, L) = share of historical sequences whose critical L >= L. */
+var Engine = (function () {
+  function realReturns(data, alloc, fee, cashReal) {
+    var tot = alloc.s + alloc.b + alloc.c;
+    var ws = alloc.s / tot, wb = alloc.b / tot, wc = alloc.c / tot;
+    var out = new Float64Array(data.length);
+    for (var i = 0; i < data.length; i++) {
+      var d = data[i];
+      var inf = d.inf;
+      var rs = (1 + d.stocks) / (1 + inf) - 1;
+      var rb = (1 + d.bonds) / (1 + inf) - 1;
+      var rc = (d.cash != null && !isNaN(d.cash)) ? (1 + d.cash) / (1 + inf) - 1 : cashReal;
+      var r = ws * rs + wb * rb + wc * rc;
+      out[i] = (1 + r) * (1 - fee) - 1;
+    }
+    return out;
+  }
+
+  function buildScenario(p) {
+    var N = p.pa1 - p.a1;
+    if (p.a2 != null) N = Math.max(N, p.pa2 - p.a2);
+    N = Math.max(1, Math.round(N));
+    var mh = Math.max(0, Math.round(p.mh || 0)), Next = N + mh;
+    var a = new Float64Array(Next), c = new Float64Array(Next), dchg = new Float64Array(Next),
+      inc = new Float64Array(Next), retired = new Uint8Array(Next), age1 = [], age2 = [];
+    var firstRet = -1;
+    for (var k = 0; k < Next; k++) {
+      var g1 = p.a1 + k, g2 = p.a2 != null ? p.a2 + k : null;
+      age1.push(g1); age2.push(g2);
+      var ret = g1 >= p.ra;
+      retired[k] = ret ? 1 : 0;
+      if (ret && firstRet < 0 && k < N) firstRet = k;
+      var ss = 0;
+      for (var i = 0; i < p.ss.length; i++) {
+        var s = p.ss[i];
+        var ag = s.who === 2 ? g2 : g1;
+        if (ag != null && ag >= s.age) ss += s.amt;
+      }
+      inc[k] = ss;
+      var lump = 0;
+      for (i = 0; i < p.lumps.length; i++) if (p.lumps[i].age === g1) lump += p.lumps[i].amt;
+      if (ret) {
+        var pct = 0, dol = 0;
+        for (i = 0; i < p.chg.length; i++) {
+          var ch = p.chg[i];
+          if (g1 >= ch.from && (ch.to == null || g1 < ch.to)) {
+            if (ch.pct) pct += ch.amt; else dol += ch.amt;
+          }
+        }
+        a[k] = Math.max(0, 1 + pct);
+        dchg[k] = dol;
+        c[k] = dol - ss - lump;
+      } else {
+        var contrib = p.contrib * Math.pow(1 + p.cg, k);
+        a[k] = 0;
+        c[k] = -contrib - ss - lump;
+      }
+    }
+    return { N: N, mh: mh, Next: Next, a: a, c: c, dchg: dchg, inc: inc, retired: retired, firstRet: firstRet, age1: age1, age2: age2 };
+  }
+
+  // critical spending level for one historical sequence starting at hist index s,
+  // from scenario year k with portfolio P, horizon H = N - k
+  function hz(k, sc) { return Math.max(sc.N - k, sc.mh); }
+  function critL(P, k, sc, r, s) {
+    var H = hz(k, sc), inv = 1, A = 0, C = 0, best = Infinity;
+    for (var j = 0; j < H; j++) {
+      A += sc.a[k + j] * inv;
+      C += sc.c[k + j] * inv;
+      var room = P - C;
+      if (A > 1e-12) { var v = room / A; if (v < best) best = v; }
+      else if (room < -1e-9) return -Infinity;
+      inv /= (1 + r[s + j]);
+    }
+    return best;
+  }
+  function critP(L, k, sc, r, s) {
+    var H = hz(k, sc), inv = 1, need = 0, best = 0;
+    for (var j = 0; j < H; j++) {
+      need += (L * sc.a[k + j] + sc.c[k + j]) * inv;
+      if (need > best) best = need;
+      inv /= (1 + r[s + j]);
+    }
+    return best;
+  }
+  function nSeq(Y, H) { return Y - H + 1; }
+
+  function distL(P, k, sc, r, out) {
+    var H = hz(k, sc), n = nSeq(r.length, H);
+    for (var s = 0; s < n; s++) out[s] = critL(P, k, sc, r, s);
+    return n;
+  }
+  // largest L whose success rate >= p, from n critical levels in buf (buf is sorted in place)
+  function levelAt(buf, n, p) {
+    var arr = buf.subarray(0, n);
+    arr.sort(); // ascending
+    var need = Math.ceil(p * n - 1e-9); // number of sequences that must survive
+    if (need < 1) need = 1;
+    if (need > n) need = n;
+    var v = arr[n - need];
+    return v;
+  }
+  function successAt(buf, n, L) {
+    var ok = 0;
+    for (var i = 0; i < n; i++) if (buf[i] >= L - 1e-6) ok++;
+    return ok / n;
+  }
+
+  /* ---------- Planner (historical backtest from today) ---------- */
+  function plan(p, data) {
+    var r = realReturns(data, p.alloc, p.fee, p.cashReal);
+    var sc = buildScenario(p);
+    var Y = r.length;
+    if (hz(0, sc) > Y) return { error: "Horizon of " + sc.N + " years exceeds " + Y + " years of data." };
+    var n = nSeq(Y, hz(0, sc));
+    var buf = new Float64Array(n);
+    distL(p.p0, 0, sc, r, buf);
+    var Ls = Array.prototype.slice.call(buf);
+    var sr = successAt(buf, n, p.spend);
+    var maxSpend = levelAt(buf, n, p.tgt);
+    var Ps = [];
+    for (var s = 0; s < n; s++) Ps.push(critP(p.spend, 0, sc, r, s));
+    var sortedP = Ps.slice().sort(function (x, y) { return x - y; });
+    var needP = sortedP[Math.max(0, Math.ceil(p.tgt * n - 1e-9) - 1)];
+    // per-sequence paths at chosen spend
+    var paths = [], ends = [];
+    for (s = 0; s < n; s++) {
+      var P = p.p0, path = [], failed = -1;
+      for (var k = 0; k < sc.N; k++) {
+        P -= (sc.retired[k] ? p.spend * sc.a[k] : 0) + sc.c[k];
+        if (P < 0 && failed < 0) failed = k;
+        if (P < 0) P = 0;
+        P *= 1 + r[s + k];
+        path.push(P);
+      }
+      paths.push(path); ends.push({ year: data[s].year, end: P, failed: failed, maxSpend: Ls[s], needP: Ps[s] });
+    }
+    // success vs spend curve
+    var sortedL = Ls.slice().sort(function (x, y) { return x - y; });
+    return { N: sc.N, n: n, success: sr, maxSpend: Math.max(0, maxSpend), needP: needP, ends: ends, paths: paths,
+      sortedL: sortedL, sc: { age1: sc.age1, firstRet: sc.firstRet, inc: Array.from(sc.inc), a: Array.from(sc.a), dchg: Array.from(sc.dchg) },
+      firstYear: data[0].year, lastYear: data[Y - 1].year };
+  }
+
+  /* ---------- Guardrails Monte Carlo ---------- */
+  function rng(seed) {
+    var t = seed >>> 0;
+    return function () {
+      t += 0x6D2B79F5; var x = t;
+      x = Math.imul(x ^ (x >>> 15), x | 1);
+      x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+      return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+  function makePath(N, Y, p, rand, out) {
+    if (p.rm === "block") {
+      var bl = Math.max(1, Math.min(p.bl, Y)), k = 0;
+      while (k < N) {
+        var st = Math.floor(rand() * (Y - bl + 1));
+        for (var j = 0; j < bl && k < N; j++, k++) out[k] = st + j;
+      }
+    } else {
+      var st2;
+      if (p.wrap || N > Y) { st2 = Math.floor(rand() * Y); for (var i = 0; i < N; i++) out[i] = (st2 + i) % Y; }
+      else { st2 = Math.floor(rand() * (Y - N + 1)); for (i = 0; i < N; i++) out[i] = st2 + i; }
+    }
+  }
+
+  function simulate(p, data, mode, progress) {
+    var r = realReturns(data, p.alloc, p.fee, p.cashReal);
+    var sc = buildScenario(p), N = sc.N, Y = r.length;
+    if (sc.firstRet < 0) return { error: "Retirement age is after the planning horizon." };
+    var H0 = mode === "today" ? hz(0, sc) : hz(sc.firstRet, sc);
+    if (H0 > Y) return { error: "Backtest horizon of " + H0 + " years exceeds " + Y + " years of data." };
+    var R = N - sc.firstRet; // retirement years
+    var n = p.n;
+    var buf = new Float64Array(Y);
+    var idx = new Int32Array(N);
+    var rand = rng(p.seed + (mode === "today" ? 7919 : 0));
+    var income = new Float64Array(n * R), level = new Float64Array(n * R), port = new Float64Array(n * R);
+    var srArr = new Float64Array(n * R), act = new Int8Array(n * R), yrs = new Int16Array(n * N);
+    var portAtRet = new Float64Array(n), initL = new Float64Array(n), depl = new Int32Array(n), cuts = new Int32Array(n),
+      raises = new Int32Array(n), worstCut = new Float64Array(n), endP = new Float64Array(n), firstIncome = new Float64Array(n);
+    var cache0 = null;
+    if (mode === "today") { var n0 = distL(p.p0, 0, sc, r, buf); cache0 = levelAt(buf, n0, p.gi); }
+    for (var path = 0; path < n; path++) {
+      makePath(N, Y, p, rand, idx);
+      for (var q = 0; q < N; q++) yrs[path * N + q] = idx[q];
+      var a0 = 0;
+      var P = p.p0, L = mode === "today" ? Math.max(0, cache0) : NaN, depleted = -1, nc = 0, nr = 0, wc = 0;
+      for (var k = 0; k < N; k++) {
+        var ri = k - sc.firstRet, sr = NaN;
+        if (sc.retired[k]) {
+          if (ri === 0) portAtRet[path] = P;
+          if (isNaN(L)) {
+            var m = distL(P, k, sc, r, buf);
+            L = Math.max(0, levelAt(buf, m, p.gi));
+            sr = p.gi; a0 = 2;
+          } else {
+            a0 = 0;
+            m = distL(P, k, sc, r, buf);
+            sr = successAt(buf, m, L);
+            if (sr >= p.gu - 1e-9) {
+              var nl = Math.max(0, levelAt(buf, m, p.gut));
+              if (nl > L + 1e-6) { L = nl; nr++; a0 = 1; }
+              sr = successAt(buf, m, L);
+            } else if (sr <= p.gl + 1e-9) {
+              var nl2 = Math.max(0, levelAt(buf, m, p.glt));
+              if (nl2 < L - 1e-6) { var cut = 1 - nl2 / L; if (cut > wc) wc = cut; L = nl2; nc++; a0 = -1; }
+              sr = successAt(buf, m, L);
+            }
+          }
+          if (ri === 0) initL[path] = L;
+          var w = L * sc.a[k] + sc.c[k];
+          var inc = L * sc.a[k] + sc.dchg[k];
+          if (P - w < -1) { inc -= (w - P); if (inc < sc.inc[k]) inc = sc.inc[k]; P = 0; if (depleted < 0) depleted = ri; }
+          else { P -= w; if (P < 0) P = 0; }
+          var o = path * R + ri;
+          income[o] = inc; level[o] = L; srArr[o] = sr; act[o] = (mode === "today" && ri === 0 && a0 === 0) ? 2 : a0;
+          if (ri === 0) firstIncome[path] = inc;
+        } else {
+          P -= sc.c[k];
+          if (P < 0) P = 0;
+        }
+        P *= 1 + r[idx[k]];
+        if (sc.retired[k]) port[path * R + ri] = P;
+      }
+      depl[path] = depleted; cuts[path] = nc; raises[path] = nr; worstCut[path] = wc; endP[path] = P;
+      if (progress && path % 50 === 0) progress(path / n);
+    }
+    return { mode: mode, n: n, R: R, N: N, firstRet: sc.firstRet, ages: sc.age1.slice(sc.firstRet), income: income, level: level, port: port, sr: srArr, act: act, yrs: yrs,
+      portAtRet: portAtRet, initL: initL, depl: depl, cuts: cuts, raises: raises, worstCut: worstCut, endP: endP, firstIncome: firstIncome,
+      guaranteed: Array.from(sc.inc).slice(sc.firstRet), plannedA: Array.from(sc.a).slice(sc.firstRet), dchg: Array.from(sc.dchg).slice(sc.firstRet) };
+  }
+
+  return { realReturns: realReturns, buildScenario: buildScenario, critL: critL, critP: critP, plan: plan, simulate: simulate, levelAt: levelAt, successAt: successAt, distL: distL };
+})();
+if (typeof module !== "undefined") module.exports = Engine;
+</script>
+<script>
+"use strict";
+var DATA = JSON.parse(document.getElementById("data").textContent);
+var ENGINE_SRC = document.getElementById("engine-src").textContent;
+
+/* ---------------- parameters (all live in the URL) ---------------- */
+var SCHEMA = [
+  ["Data", [
+    ["ds", "Historical dataset", "sel", "dam", [["dam", "Damodaran 1928–2025 (stocks, T-bills, 10y T-bond)"], ["hybrid", "Shiller 1871–1927 + Damodaran 1928–2025"], ["shiller", "Shiller 1871–2022 (no cash series)"], ["custom", "Custom CSV (load below)"]]],
+    ["y0", "First year used", "int", ""],
+    ["y1", "Last year used", "int", ""],
+    ["cr", "Cash real return % (when no cash data)", "num", 0, "Used for years with no T-bill data (Shiller years)."],
+  ]],
+  ["Household (ages today)", [
+    ["a1", "Person 1 age", "int", 45],
+    ["pa1", "Person 1 planning age", "int", 95],
+    ["a2", "Person 2 age (blank = single)", "int", 43],
+    ["pa2", "Person 2 planning age", "int", 95],
+    ["ra", "Retire when person 1 is age", "int", 55, "Horizon runs until both reach their planning age."],
+  ]],
+  ["Portfolio & saving", [
+    ["p", "Portfolio today $", "num", 600000],
+    ["c", "Annual deposit until retirement $", "num", 30000],
+    ["cg", "Deposit real growth %/yr", "num", 0],
+    ["lump", "Lump sums  age:$", "txt", "", "Person 1 age. + inflow, − outflow. e.g. 60:-50000, 70:100000"],
+  ]],
+  ["Spending (today's $)", [
+    ["s", "Annual spending $ (Planner)", "num", 70000, "Total spending, before Social Security. Portfolio covers the gap."],
+    ["chg", "Spending changes", "txt", "55-65:12000, 80:-10%", "AGE:$ or AGE-AGE:$ (until 2nd age) or AGE:% of base level. Person 1 age."],
+    ["tgt", "Planner target success %", "num", 80],
+  ]],
+  ["Social Security (annual, today's $)", [
+    ["ss1", "Person 1 benefit $", "num", 30000],
+    ["ssa1", "Person 1 start age", "int", 67],
+    ["ss2", "Person 2 benefit $", "num", 18000],
+    ["ssa2", "Person 2 start age", "int", 67],
+  ]],
+  ["Allocation (rebalanced yearly)", [
+    ["stk", "Stocks %", "num", 80],
+    ["bnd", "Bonds (10y Treasury) %", "num", 0],
+    ["csh", "Cash (3-mo T-bill) %", "num", 20],
+    ["fee", "Annual fee %", "num", 0.05],
+  ]],
+  ["Guardrails (Kitces / Income Lab)", [
+    ["gi", "Initial spending at success %", "num", 80],
+    ["gu", "Upper guardrail: success ≥ %", "num", 100],
+    ["gut", "…then raise to success %", "num", 80],
+    ["gl", "Lower guardrail: success ≤ %", "num", 25],
+    ["glt", "…then cut to success %", "num", 45],
+    ["mh", "Min. years in success test", "int", 0, "0 = pure method (horizon shrinks to planning age). e.g. 10 damps end-of-plan raises."],
+  ]],
+  ["Simulation", [
+    ["sm", "Starting spending set", "sel", "both", [["both", "Both"], ["retire", "At retirement (per path)"], ["today", "Locked in today"]]],
+    ["n", "Number of simulated lives", "int", 1000],
+    ["rm", "Return sequence", "sel", "block", [["block", "Spliced random historical blocks"], ["hist", "One whole historical period"]]],
+    ["bl", "Block length (years)", "int", 10],
+    ["wrap", "Whole period: wrap around end of data", "sel", "1", [["1", "Yes"], ["0", "No"]]],
+    ["seed", "Random seed", "int", 1],
+    ["pb", "Income bands (% of year-1 income)", "txt", "95,90,80,70,60"],
+    ["db", "Income floors ($, today's)", "txt", "90000,80000,70000,60000"],
+    ["pi", "Example life # to inspect", "int", 1],
+  ]],
+];
+var PARAMS = {}; SCHEMA.forEach(function (g) { g[1].forEach(function (f) { PARAMS[f[0]] = f; }); });
+var state = { tab: "plan" };
+
+function readURL() {
+  var q = new URLSearchParams(location.search);
+  state.tab = ["plan", "sim", "about"].indexOf(q.get("tab")) >= 0 ? q.get("tab") : "plan";
+  Object.keys(PARAMS).forEach(function (k) {
+    var f = PARAMS[k], v = q.has(k) ? q.get(k) : String(f[3]);
+    if (f[2] === "sel" && !f[4].some(function (o) { return o[0] === v; })) v = String(f[3]);
+    state[k] = v;
+  });
+}
+function writeURL() {
+  var q = new URLSearchParams();
+  q.set("tab", state.tab);
+  Object.keys(PARAMS).forEach(function (k) { q.set(k, state[k]); });
+  var url = location.pathname + "?" + q.toString().replace(/%2C/g, ",").replace(/%3A/g, ":");
+  try { history.replaceState(null, "", url); } catch (e) {}
+}
+
+function buildForm() {
+  var f = document.getElementById("form"), h = "";
+  SCHEMA.forEach(function (g) {
+    h += "<fieldset><legend>" + g[0] + "</legend>";
+    g[1].forEach(function (p) {
+      var k = p[0], wide = p[2] === "txt" || (p[2] === "sel" && k === "ds");
+      h += '<div class="row' + (wide ? " wide" : "") + '"><label for="f_' + k + '">' + p[1] + ' <code>' + k + '</code></label>';
+      if (p[2] === "sel") {
+        h += '<select id="f_' + k + '" data-k="' + k + '">' + p[4].map(function (o) { return '<option value="' + o[0] + '">' + o[1] + "</option>"; }).join("") + "</select>";
+      } else {
+        h += '<input id="f_' + k + '" data-k="' + k + '" ' + (p[2] === "txt" ? 'type="text"' : 'type="text" inputmode="decimal"') + ">";
+      }
+      h += "</div>";
+      var help = p[2] === "sel" ? null : p[4];
+      if (help) h += '<div class="help">' + help + "</div>";
+      if (k === "ds") h += '<div class="row wide" id="customrow"><input type="file" id="csvfile" accept=".csv,text/csv" aria-label="Custom returns CSV file"><div class="help">CSV columns: year, stocks, bonds, cash, inflation (nominal annual returns, as decimals or %). Saved in this browser.</div></div>';
+    });
+    h += "</fieldset>";
+  });
+  f.innerHTML = h;
+  f.querySelectorAll("[data-k]").forEach(function (el) {
+    el.value = state[el.dataset.k];
+    el.addEventListener(el.tagName === "SELECT" ? "change" : "input", function () { state[el.dataset.k] = el.value.trim(); changed(); });
+  });
+  document.getElementById("csvfile").addEventListener("change", loadCSV);
+}
+
+/* ---------------- custom data ---------------- */
+function loadCSV(ev) {
+  var file = ev.target.files[0]; if (!file) return;
+  file.text().then(function (txt) {
+    var lines = txt.trim().split(/\r?\n/), head = lines[0].toLowerCase().split(",").map(function (s) { return s.trim(); });
+    var col = function (names) { for (var i = 0; i < head.length; i++) for (var j = 0; j < names.length; j++) if (head[i].indexOf(names[j]) >= 0) return i; return -1; };
+    var ci = { year: col(["year"]), stocks: col(["stock", "s&p", "equit"]), bonds: col(["bond"]), cash: col(["cash", "bill"]), inf: col(["infl", "cpi"]) };
+    if (ci.year < 0 || ci.stocks < 0 || ci.inf < 0) { alert("Need at least year, stocks and inflation columns."); return; }
+    var rows = lines.slice(1).map(function (l) { return l.split(","); });
+    function num(v) { if (v == null || v.trim() === "") return null; var pct = v.indexOf("%") >= 0; var x = parseFloat(v.replace(/[%$\s]/g, "")); return pct ? x / 100 : x; }
+    var out = rows.map(function (r) { return { year: parseInt(r[ci.year]), stocks: num(r[ci.stocks]), bonds: ci.bonds >= 0 ? num(r[ci.bonds]) : 0, cash: ci.cash >= 0 ? num(r[ci.cash]) : null, inf: num(r[ci.inf]) }; })
+      .filter(function (r) { return !isNaN(r.year) && r.stocks != null && r.inf != null; });
+    ["stocks", "bonds", "cash", "inf"].forEach(function (k) {
+      var mx = Math.max.apply(null, out.map(function (r) { return Math.abs(r[k] || 0); }));
+      if (mx > 2) out.forEach(function (r) { if (r[k] != null) r[k] /= 100; });
+    });
+    out.sort(function (a, b) { return a.year - b.year; });
+    try { localStorage.setItem("rbg_custom", JSON.stringify(out)); } catch (e) {}
+    DATA.custom = out; state.ds = "custom"; document.getElementById("f_ds").value = "custom"; changed();
+  });
+}
+try { var cst = localStorage.getItem("rbg_custom"); if (cst) DATA.custom = JSON.parse(cst); } catch (e) {}
+
+function dataset() {
+  var d;
+  if (state.ds === "hybrid") d = DATA.shiller.filter(function (r) { return r.year < 1928; }).concat(DATA.dam);
+  else if (state.ds === "custom") d = DATA.custom || [];
+  else d = DATA[state.ds] || DATA.dam;
+  var y0 = parseInt(state.y0), y1 = parseInt(state.y1);
+  return d.filter(function (r) { return (isNaN(y0) || r.year >= y0) && (isNaN(y1) || r.year <= y1); });
+}
+
+/* ---------------- parse into engine params ---------------- */
+function num(k) { var v = parseFloat(String(state[k]).replace(/[$,\s]/g, "")); return isNaN(v) ? NaN : v; }
+function parseList(txt, allowRange) {
+  var out = [], bad = [];
+  String(txt || "").split(/[;,]\s*(?=\d)/).forEach(function (it) {
+    it = it.trim(); if (!it) return;
+    var m = it.match(/^(\d+)(?:\s*-\s*(\d+))?\s*:\s*([+-]?[\d.,_]+)\s*(%?)$/);
+    if (!m || (m[2] && !allowRange)) { bad.push(it); return; }
+    var amt = parseFloat(m[3].replace(/[,_]/g, ""));
+    out.push({ from: +m[1], to: m[2] ? +m[2] : null, amt: m[4] ? amt / 100 : amt, pct: !!m[4] });
+  });
+  return { items: out, bad: bad };
+}
+function engineParams() {
+  var errs = [];
+  var single = String(state.a2).trim() === "";
+  var chg = parseList(state.chg, true), lump = parseList(state.lump, false);
+  if (chg.bad.length) errs.push("Can't read spending change(s): " + chg.bad.join(", "));
+  if (lump.bad.length || lump.items.some(function (x) { return x.pct; })) errs.push("Can't read lump sum(s): " + lump.bad.join(", "));
+  var p = {
+    a1: num("a1"), pa1: num("pa1"), a2: single ? null : num("a2"), pa2: num("pa2"), ra: num("ra"),
+    p0: num("p"), contrib: num("c"), cg: num("cg") / 100, spend: num("s"), tgt: num("tgt") / 100,
+    ss: [{ amt: num("ss1"), age: num("ssa1"), who: 1 }].concat(single ? [] : [{ amt: num("ss2"), age: num("ssa2"), who: 2 }]),
+    chg: chg.items, lumps: lump.items.map(function (x) { return { age: x.from, amt: x.amt }; }),
+    alloc: { s: num("stk"), b: num("bnd"), c: num("csh") }, fee: num("fee") / 100, cashReal: num("cr") / 100,
+    gi: num("gi") / 100, gu: num("gu") / 100, gut: num("gut") / 100, gl: num("gl") / 100, glt: num("glt") / 100, mh: num("mh"),
+    n: Math.max(10, Math.min(20000, num("n"))), rm: state.rm, bl: num("bl"), wrap: state.wrap === "1", seed: num("seed")
+  };
+  ["a1", "pa1", "ra", "p0", "contrib", "spend", "tgt", "fee", "gi", "gu", "gut", "gl", "glt", "n", "bl", "seed"].forEach(function (k) { if (isNaN(p[k])) errs.push("Field " + k + " is not a number."); });
+  if (!single) ["a2", "pa2"].forEach(function (k) { if (isNaN(p[k])) errs.push("Field " + k + " is not a number."); });
+  p.ss.forEach(function (s) { if (isNaN(s.amt) || isNaN(s.age)) errs.push("Social Security fields must be numbers."); });
+  if (p.alloc.s + p.alloc.b + p.alloc.c <= 0) errs.push("Allocation must add to more than 0%.");
+  if (Math.abs(p.alloc.s + p.alloc.b + p.alloc.c - 100) > 0.01) errs.push("Note: allocation sums to " + (p.alloc.s + p.alloc.b + p.alloc.c) + "% – it is rescaled to 100%.");
+  if (isNaN(p.mh)) p.mh = 0;
+  if (isNaN(p.cg)) p.cg = 0; if (isNaN(p.cashReal)) p.cashReal = 0;
+  return { p: p, errs: errs };
+}
+
+/* ---------------- formatting ---------------- */
+function fm(x) { if (x == null || isNaN(x)) return "–"; var a = Math.abs(x); return (x < 0 ? "−$" : "$") + (a >= 1e6 ? (a / 1e6).toFixed(2) + "M" : a >= 1e4 ? Math.round(a / 1e3) + "k" : Math.round(a).toLocaleString()); }
+function fmFull(x) { return (x < 0 ? "−$" : "$") + Math.round(Math.abs(x)).toLocaleString(); }
+function pc(x, d) { return (x * 100).toFixed(d == null ? 0 : d) + "%"; }
+function quant(arr, q) { var b = Float64Array.from(arr).sort(); if (!b.length) return NaN; var i = (b.length - 1) * q, lo = Math.floor(i), hi = Math.ceil(i); return b[lo] + (b[hi] - b[lo]) * (i - lo); }
+function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+
+/* ---------------- charts (plain SVG, hover tooltips) ---------------- */
+var tip = document.getElementById("tip");
+function showTip(e, html) { tip.innerHTML = html; tip.style.display = "block"; var x = e.clientX + 14, y = e.clientY + 14; var w = tip.offsetWidth, h = tip.offsetHeight; if (x + w > innerWidth - 8) x = e.clientX - w - 14; if (y + h > innerHeight - 8) y = e.clientY - h - 14; tip.style.left = x + scrollX + "px"; tip.style.top = y + scrollY + "px"; }
+function hideTip() { tip.style.display = "none"; }
+function niceTicks(lo, hi, n) {
+  if (hi <= lo) hi = lo + 1; var span = hi - lo, step = Math.pow(10, Math.floor(Math.log10(span / n))), err = n / span * step;
+  if (err <= .15) step *= 10; else if (err <= .35) step *= 5; else if (err <= .75) step *= 2;
+  var t = [], s = Math.ceil(lo / step) * step; for (var v = s; v <= hi + step * 1e-9; v += step) t.push(+v.toFixed(10)); return t;
+}
+/* opts: {x:[], series:[{y:[], color, width, dash, label}], bands:[{lo:[], hi:[], color, opacity}], yFmt, xFmt, yMin, yMax, hlines:[{y,label}], vlines:[{x,label}], tipRows(i) -> html, height, xLabel, bars:true} */
+function chart(el, o) {
+  var W = el.clientWidth || 700, H = o.height || 260, m = { l: 62, r: 16, t: 10, b: 30 };
+  var xs = o.x, n = xs.length;
+  var ymin = o.yMin != null ? o.yMin : Infinity, ymax = o.yMax != null ? o.yMax : -Infinity;
+  if (o.yMin == null || o.yMax == null) {
+    var all = []; (o.series || []).forEach(function (s) { all = all.concat(s.y); }); (o.bands || []).forEach(function (b) { all = all.concat(b.lo, b.hi); }); (o.hlines || []).forEach(function (h) { all.push(h.y); });
+    all = all.filter(function (v) { return isFinite(v); });
+    if (o.yMin == null) ymin = Math.min(0, Math.min.apply(null, all)); if (o.yMax == null) ymax = Math.max.apply(null, all) * 1.04;
+  }
+  var yt = niceTicks(ymin, ymax, 5); ymin = Math.min(ymin, yt[0]); ymax = Math.max(ymax, yt[yt.length - 1]);
+  var x0 = xs[0], x1 = xs[n - 1]; if (o.bars) { x0 -= .5; x1 += .5; }
+  var X = function (v) { return m.l + (v - x0) / ((x1 - x0) || 1) * (W - m.l - m.r); };
+  var Y = function (v) { return m.t + (1 - (v - ymin) / ((ymax - ymin) || 1)) * (H - m.t - m.b); };
+  var hd = el.closest(".card") && el.closest(".card").querySelector("h3");
+  var s = '<svg viewBox="0 0 ' + W + " " + H + '" role="img" aria-label="' + esc(hd ? hd.textContent + " chart" : "Chart") + '">';
+  yt.forEach(function (t) { s += '<line x1="' + m.l + '" x2="' + (W - m.r) + '" y1="' + Y(t) + '" y2="' + Y(t) + '" stroke="var(--grid)" stroke-width="1"/><text x="' + (m.l - 6) + '" y="' + (Y(t) + 4) + '" text-anchor="end">' + (o.yFmt || fm)(t) + "</text>"; });
+  var xt = o.xTicks || niceTicks(xs[0], xs[n - 1], Math.max(3, Math.floor(W / 80)));
+  xt.forEach(function (t) { if (t < xs[0] || t > xs[n - 1]) return; s += '<text x="' + X(t) + '" y="' + (H - m.b + 16) + '" text-anchor="middle">' + (o.xFmt ? o.xFmt(t) : t) + "</text>"; });
+  if (o.xLabel) s += '<text x="' + (W - m.r) + '" y="' + (H - 2) + '" text-anchor="end">' + o.xLabel + "</text>";
+  (o.bands || []).forEach(function (b) {
+    var d = "M" + xs.map(function (x, i) { return X(x) + "," + Y(b.hi[i]); }).join("L") + "L" + xs.slice().reverse().map(function (x, j) { var i = n - 1 - j; return X(x) + "," + Y(b.lo[i]); }).join("L") + "Z";
+    s += '<path d="' + d + '" fill="' + b.color + '" fill-opacity="' + (b.opacity || 1) + '"/>';
+  });
+  if (o.bars) {
+    var bw = Math.max(1, (W - m.l - m.r) / n - 2);
+    o.series[0].y.forEach(function (v, i) { var y0 = Y(Math.max(0, ymin)), y = Y(v); var col = o.barColor ? o.barColor(i) : "var(--seq-4)"; s += '<rect x="' + (X(xs[i]) - bw / 2) + '" y="' + Math.min(y, y0) + '" width="' + bw + '" height="' + Math.max(0.5, Math.abs(y0 - y)) + '" rx="' + Math.min(2, bw / 3) + '" fill="' + col + '"/>'; });
+  }
+  (o.hlines || []).forEach(function (h) { s += '<line x1="' + m.l + '" x2="' + (W - m.r) + '" y1="' + Y(h.y) + '" y2="' + Y(h.y) + '" stroke="var(--text-muted)" stroke-dasharray="4 3" stroke-width="1"/><text x="' + (W - m.r - 2) + '" y="' + (Y(h.y) - 4) + '" text-anchor="end">' + esc(h.label) + "</text>"; });
+  (o.vlines || []).forEach(function (v) { s += '<line x1="' + X(v.x) + '" x2="' + X(v.x) + '" y1="' + m.t + '" y2="' + (H - m.b) + '" stroke="var(--text-muted)" stroke-dasharray="4 3"/><text x="' + (X(v.x) + 4) + '" y="' + (m.t + 10) + '">' + esc(v.label) + "</text>"; });
+  if (!o.bars) (o.series || []).forEach(function (sr) {
+    var d = "", pen = false; sr.y.forEach(function (v, i) { if (!isFinite(v)) { pen = false; return; } d += (pen ? "L" : "M") + X(xs[i]).toFixed(1) + "," + Y(v).toFixed(1); pen = true; });
+    s += '<path d="' + d + '" fill="none" stroke="' + sr.color + '" stroke-width="' + (sr.width || 2) + '" stroke-linejoin="round"' + (sr.dash ? ' stroke-dasharray="' + sr.dash + '"' : "") + "/>";
+    (sr.dots || []).forEach(function (dt) { s += '<circle cx="' + X(xs[dt.i]) + '" cy="' + Y(sr.y[dt.i]) + '" r="4.5" fill="' + dt.color + '" stroke="var(--surface-1)" stroke-width="2"/>'; });
+  });
+  s += '<line class="xh" x1="0" x2="0" y1="' + m.t + '" y2="' + (H - m.b) + '" stroke="var(--text-muted)" stroke-width="1" style="display:none"/>';
+  s += '<rect x="' + m.l + '" y="' + m.t + '" width="' + (W - m.l - m.r) + '" height="' + (H - m.t - m.b) + '" fill="transparent" class="hit"/></svg>';
+  el.innerHTML = s;
+  var svg = el.querySelector("svg"), xh = el.querySelector(".xh"), hit = el.querySelector(".hit");
+  if (o.tipRows) {
+    hit.addEventListener("mousemove", function (e) {
+      var r = svg.getBoundingClientRect(), px = (e.clientX - r.left) * W / r.width;
+      var v = x0 + (px - m.l) / (W - m.l - m.r) * (x1 - x0), i = 0, best = Infinity;
+      for (var j = 0; j < n; j++) { var dd = Math.abs(xs[j] - v); if (dd < best) { best = dd; i = j; } }
+      xh.setAttribute("x1", X(xs[i])); xh.setAttribute("x2", X(xs[i])); xh.style.display = "";
+      showTip(e, o.tipRows(i));
+    });
+    hit.addEventListener("mouseleave", function () { xh.style.display = "none"; hideTip(); });
+  }
+}
+function legend(items) { return '<div class="legendrow">' + items.map(function (it) { return '<span><span class="sw" style="background:' + it[0] + (it[2] ? ";height:2px;vertical-align:3px" : "") + '"></span>' + it[1] + "</span>"; }).join("") + "</div>"; }
+
+/* ---------------- Planner tab ---------------- */
+function renderPlan(p, data) {
+  var out = document.getElementById("out-plan");
+  var r = Engine.plan(p, data);
+  if (r.error) { out.innerHTML = '<div class="err">' + r.error + "</div>"; return; }
+  var preRet = p.a1 < p.ra;
+  var tiles = [
+    ["Success rate at " + fm(p.spend) + "/yr", pc(r.success), r.n + " historical periods of " + r.N + " yrs (" + r.firstYear + "–" + r.lastYear + " data)"],
+    ["Max spending at " + pc(p.tgt) + " success", fm(r.maxSpend) + "/yr", "with your portfolio of " + fm(p.p0) + (preRet ? " + deposits" : "")],
+    ["Portfolio needed today for " + pc(p.tgt), fm(r.needP), "to spend " + fm(p.spend) + "/yr" + (preRet ? " (deposits continue)" : "")],
+    ["Gap vs. today", (r.needP <= p.p0 ? "+" : "−") + fm(Math.abs(p.p0 - r.needP)), r.needP <= p.p0 ? "ahead of target" : "short of target"],
+  ];
+  var h = '<div class="tiles">' + tiles.map(function (t) { return '<div class="tile"><div class="k">' + t[0] + '</div><div class="v">' + t[1] + '</div><div class="s">' + t[2] + "</div></div>"; }).join("") + "</div>";
+  h += '<div class="grid2"><div class="card"><h3>Success rate vs. annual spending</h3><p class="sub">Share of historical periods that never run out, for each base spending level (all spending changes and Social Security applied).</p><div class="chart" id="c_curve"></div></div>';
+  h += '<div class="card"><h3>Max sustainable spending by start year</h3><p class="sub">The highest base spending each historical period could have funded. Bars below the line failed at ' + fm(p.spend) + '.</p><div class="chart" id="c_years"></div></div></div>';
+  h += '<div class="card"><h3>Portfolio paths at ' + fm(p.spend) + '/yr (today\'s dollars)</h3><p class="sub">Percentiles across all historical periods, by person 1\'s age.</p>' + legend([["var(--seq-1)", "10th–90th percentile"], ["var(--seq-2)", "25th–75th"], ["var(--seq-6)", "Median", 1]]) + '<div class="chart" id="c_pp"></div></div>';
+  h += '<details><summary>Table: every historical period</summary><table><thead><tr><th>Start year</th><th>Max spending</th><th>Portfolio needed</th><th>Ending balance</th><th>Result</th></tr></thead><tbody>' +
+    r.ends.map(function (e) { return "<tr><td>" + e.year + "</td><td>" + fmFull(e.maxSpend) + "</td><td>" + fmFull(e.needP) + "</td><td>" + fmFull(e.end) + "</td><td>" + (e.failed >= 0 ? "Fails at age " + r.sc.age1[e.failed] : "OK") + "</td></tr>"; }).join("") + "</tbody></table></details>";
+  out.innerHTML = h;
+  // curve
+  var L = r.sortedL, lo = Math.max(0, quant(L, 0.01) * 0.85), hi = quant(L, 0.99) * 1.1, xsv = [], ysv = [];
+  for (var i = 0; i <= 80; i++) { var v = lo + (hi - lo) * i / 80; xsv.push(v); var ok = 0; for (var j = 0; j < L.length; j++) if (L[j] >= v - 1e-6) ok++; ysv.push(ok / L.length); }
+  chart(document.getElementById("c_curve"), { x: xsv, series: [{ y: ysv, color: "var(--seq-4)" }], yMin: 0, yMax: 1, yFmt: function (v) { return pc(v); }, xFmt: fm,
+    xTicks: niceTicks(lo, hi, 5), vlines: [{ x: p.spend, label: "your " + fm(p.spend) }], hlines: [{ y: p.tgt, label: "target " + pc(p.tgt) }],
+    tipRows: function (i) { return "<b>" + fmFull(xsv[i]) + "/yr</b><br>success " + pc(ysv[i], 1); } });
+  var yrs = r.ends.map(function (e) { return e.year; }), ms = r.ends.map(function (e) { return e.maxSpend; });
+  chart(document.getElementById("c_years"), { x: yrs, bars: true, series: [{ y: ms }], hlines: [{ y: p.spend, label: fm(p.spend) }],
+    barColor: function (i) { return ms[i] < p.spend ? "var(--series-2)" : "var(--seq-4)"; },
+    tipRows: function (i) { return "<b>Start " + yrs[i] + "</b><br>max spending " + fmFull(ms[i]) + "<br>portfolio needed " + fmFull(r.ends[i].needP); } });
+  var ages = r.sc.age1.map(function (a) { return a + 1; }), q = function (qq) { return ages.map(function (_, k) { return quant(r.paths.map(function (pp) { return pp[k]; }), qq); }); };
+  var q10 = q(.1), q25 = q(.25), q50 = q(.5), q75 = q(.75), q90 = q(.9);
+  chart(document.getElementById("c_pp"), { x: ages, bands: [{ lo: q10, hi: q90, color: "var(--seq-1)" }, { lo: q25, hi: q75, color: "var(--seq-2)" }], series: [{ y: q50, color: "var(--seq-6)" }], xLabel: "age (end of year)",
+    tipRows: function (i) { return "<b>Age " + ages[i] + "</b><br>90th " + fmFull(q90[i]) + "<br>75th " + fmFull(q75[i]) + "<br>median " + fmFull(q50[i]) + "<br>25th " + fmFull(q25[i]) + "<br>10th " + fmFull(q10[i]); } });
+}
+
+/* ---------------- Simulation tab ---------------- */
+var worker = null, simTimer = null, lastSim = null;
+function makeWorker() {
+  try {
+    var src = ENGINE_SRC + "\nonmessage=function(e){var d=e.data,res={};for(var i=0;i<d.modes.length;i++){var m=d.modes[i];res[m]=Engine.simulate(d.p,d.data,m,function(f){postMessage({progress:(i+f)/d.modes.length});});}postMessage({done:res});};";
+    return new Worker(URL.createObjectURL(new Blob([src], { type: "text/javascript" })));
+  } catch (e) { return null; }
+}
+function runSim(p, data) {
+  if (worker) { worker.terminate(); worker = null; }
+  var modes = state.sm === "both" ? ["retire", "today"] : [state.sm];
+  var bar = document.getElementById("progress"); bar.style.width = "2%";
+  document.getElementById("status").textContent = "Simulating " + p.n.toLocaleString() + " lives…";
+  var t0 = performance.now();
+  var finish = function (res) { bar.style.width = "0"; document.getElementById("status").textContent = "Simulated in " + ((performance.now() - t0) / 1000).toFixed(1) + "s"; lastSim = { res: res, p: p, modes: modes }; renderSim(); };
+  worker = makeWorker();
+  if (worker) {
+    worker.onmessage = function (e) { if (e.data.progress != null) bar.style.width = (e.data.progress * 100).toFixed(0) + "%"; if (e.data.done) { worker.terminate(); worker = null; finish(e.data.done); } };
+    worker.onerror = function () { worker = null; setTimeout(function () { var res = {}; modes.forEach(function (m) { res[m] = Engine.simulate(p, data, m); }); finish(res); }, 10); };
+    worker.postMessage({ p: p, data: data, modes: modes });
+  } else setTimeout(function () { var res = {}; modes.forEach(function (m) { res[m] = Engine.simulate(p, data, m); }); finish(res); }, 10);
+}
+var MODE_NAME = { retire: "Spending set at retirement", today: "Spending locked in today" };
+function stats(S, bandsPct, floors) {
+  var n = S.n, R = S.R, st = { bandsPct: [], floors: [] };
+  bandsPct.forEach(function (b) {
+    var ever = 0, yrs = 0, lvlEver = 0;
+    for (var i = 0; i < n; i++) { var f = S.firstIncome[i] * b / 100, e = false, le = false; for (var k = 0; k < R; k++) { var o = i * R + k; if (S.income[o] < f - 0.5) { yrs++; e = true; } if (S.level[o] < S.initL[i] * b / 100 - 0.5) le = true; } if (e) ever++; if (le) lvlEver++; }
+    st.bandsPct.push({ b: b, ever: ever / n, yrs: yrs / (n * R), lvl: lvlEver / n });
+  });
+  floors.forEach(function (d) {
+    var ever = 0, yrs = 0, first = [];
+    for (var i = 0; i < n; i++) { var e = false; for (var k = 0; k < R; k++) if (S.income[i * R + k] < d - 0.5) { yrs++; if (!e) first.push(S.ages[k]); e = true; } if (e) ever++; }
+    st.floors.push({ d: d, ever: ever / n, yrs: yrs / (n * R), medAge: first.length ? quant(first, .5) : NaN });
+  });
+  var minRatio = new Float64Array(n), avgInc = new Float64Array(n);
+  for (var i = 0; i < n; i++) { var mn = Infinity, sm = 0; for (var k = 0; k < R; k++) { var v = S.income[i * R + k]; if (v < mn) mn = v; sm += v; } minRatio[i] = S.firstIncome[i] > 0 ? mn / S.firstIncome[i] : 1; avgInc[i] = sm / R; }
+  st.minRatio = minRatio; st.avgInc = avgInc;
+  st.anyCut = Array.prototype.filter.call(S.cuts, function (c) { return c > 0; }).length / n;
+  st.avgCuts = Array.prototype.reduce.call(S.cuts, function (a, b) { return a + b; }, 0) / n;
+  st.avgRaises = Array.prototype.reduce.call(S.raises, function (a, b) { return a + b; }, 0) / n;
+  st.depl = Array.prototype.filter.call(S.depl, function (d) { return d >= 0; }).length / n;
+  var pq = function (arr, k) { var a = new Float64Array(n); for (var i = 0; i < n; i++) a[i] = arr[i * R + k]; return a; };
+  st.inc = [.1, .25, .5, .75, .9].map(function (q) { return S.ages.map(function (_, k) { return quant(pq(S.income, k), q); }); });
+  st.port = [.1, .25, .5, .75, .9].map(function (q) { return S.ages.map(function (_, k) { return quant(pq(S.port, k), q); }); });
+  return st;
+}
+function renderSim() {
+  var out = document.getElementById("out-sim");
+  if (!lastSim) { out.innerHTML = '<p class="note">Running…</p>'; return; }
+  var res = lastSim.res, modes = lastSim.modes, p = lastSim.p;
+  var errs = modes.map(function (m) { return res[m].error; }).filter(Boolean);
+  if (errs.length) { out.innerHTML = '<div class="err">' + errs.join("<br>") + "</div>"; return; }
+  var pb = String(state.pb).split(/[,\s]+/).map(parseFloat).filter(isFinite), db = String(state.db).split(/[,\s]+/).map(function (x) { return parseFloat(x.replace(/[$_]/g, "")); }).filter(isFinite);
+  var ST = {}; modes.forEach(function (m) { ST[m] = stats(res[m], pb, db); });
+  var S0 = res[modes[0]];
+  var h = '<p class="note">' + S0.n.toLocaleString() + " simulated lives, " + S0.R + " retirement years each (ages " + S0.ages[0] + "–" + S0.ages[S0.R - 1] + "). Income = total spending including Social Security, in today's dollars. Returns: " +
+    (p.rm === "block" ? "random " + p.bl + "-year historical blocks spliced together" : "one random whole historical period" + (p.wrap ? " (wrapping past the end of the data)" : "")) + ". Each year the guardrail test backtests the remaining plan over every historical period.</p>";
+  // summary table across modes
+  var rowsT = [
+    ["Year-1 retirement income (median)", function (m) { return fm(quant(res[m].firstIncome, .5)); }],
+    ["Year-1 income, 10th–90th pct", function (m) { return fm(quant(res[m].firstIncome, .1)) + " – " + fm(quant(res[m].firstIncome, .9)); }],
+    ["Portfolio at retirement (median)", function (m) { return fm(quant(res[m].portAtRet, .5)); }],
+    ["Average annual income (median life)", function (m) { return fm(quant(ST[m].avgInc, .5)); }],
+    ["Lives with at least one cut", function (m) { return pc(ST[m].anyCut); }],
+    ["Average cuts / raises per life", function (m) { return ST[m].avgCuts.toFixed(1) + " / " + ST[m].avgRaises.toFixed(1); }],
+    ["Largest single cut (median of lives with a cut)", function (m) { var a = Array.prototype.filter.call(res[m].worstCut, function (x) { return x > 0; }); return a.length ? pc(quant(a, .5)) : "–"; }],
+    ["Largest single cut (90th pct)", function (m) { var a = Array.prototype.filter.call(res[m].worstCut, function (x) { return x > 0; }); return a.length ? pc(quant(a, .9)) : "–"; }],
+    ["Lowest income vs year 1 (median / 10th pct)", function (m) { return pc(quant(ST[m].minRatio, .5)) + " / " + pc(quant(ST[m].minRatio, .1)); }],
+    ["Portfolio ran out", function (m) { return pc(ST[m].depl, 1); }],
+    ["Ending portfolio (median)", function (m) { return fm(quant(res[m].endP, .5)); }],
+  ];
+  h += '<div class="card"><h3>Summary</h3><table><thead><tr><th></th>' + modes.map(function (m) { return "<th>" + MODE_NAME[m] + "</th>"; }).join("") + "</tr></thead><tbody>" +
+    rowsT.map(function (r) { return "<tr><td>" + r[0] + "</td>" + modes.map(function (m) { return "<td>" + r[1](m) + "</td>"; }).join("") + "</tr>"; }).join("") + "</tbody></table></div>";
+  // bands
+  h += '<div class="grid2"><div class="card"><h3>Income below a share of year-1 income</h3><p class="sub">"Ever" = share of lives that dip below the band at least once. "Years" = share of all retirement years spent below it. "Guardrail level" ignores your planned spending changes and Social Security and compares only the guardrail spending level to its starting value.</p><table><thead><tr><th>Band</th>' +
+    modes.map(function (m) { return '<th colspan="3">' + MODE_NAME[m] + "</th>"; }).join("") + "</tr><tr><th></th>" + modes.map(function () { return "<th>Ever</th><th>Years</th><th>Guardrail level</th>"; }).join("") + "</tr></thead><tbody>" +
+    pb.map(function (b, bi) { return "<tr><td>&lt; " + b + "%</td>" + modes.map(function (m) { var x = ST[m].bandsPct[bi]; return "<td>" + pc(x.ever, 1) + "</td><td>" + pc(x.yrs, 1) + "</td><td>" + pc(x.lvl, 1) + "</td>"; }).join("") + "</tr>"; }).join("") + "</tbody></table></div>";
+  h += '<div class="card"><h3>Income below dollar floors</h3><p class="sub">Total income, including Social Security, in today\'s dollars. "First age" = median age when income first falls below the floor, among lives where it does.</p><table><thead><tr><th>Floor</th>' +
+    modes.map(function (m) { return '<th colspan="3">' + MODE_NAME[m] + "</th>"; }).join("") + "</tr><tr><th></th>" + modes.map(function () { return "<th>Ever</th><th>Years</th><th>First age</th>"; }).join("") + "</tr></thead><tbody>" +
+    db.map(function (d, di) { return "<tr><td>&lt; " + fmFull(d) + "</td>" + modes.map(function (m) { var x = ST[m].floors[di]; return "<td>" + pc(x.ever, 1) + "</td><td>" + pc(x.yrs, 1) + "</td><td>" + (isNaN(x.medAge) ? "–" : Math.round(x.medAge)) + "</td>"; }).join("") + "</tr>"; }).join("") + "</tbody></table></div></div>";
+  modes.forEach(function (m) {
+    h += '<div class="modehdr">' + MODE_NAME[m] + "</div>";
+    h += '<div class="grid2"><div class="card"><h3>Income by age</h3><p class="sub">Percentiles across simulated lives. The dashed line is Social Security alone.</p>' + legend([["var(--seq-1)", "10th–90th"], ["var(--seq-2)", "25th–75th"], ["var(--seq-6)", "Median", 1], ["var(--text-muted)", "Social Security", 1]]) + '<div class="chart" id="ci_' + m + '"></div></div>';
+    h += '<div class="card"><h3>Portfolio by age (end of year)</h3><p class="sub">Percentiles across simulated lives, in today\'s dollars.</p>' + legend([["var(--seq-1)", "10th–90th"], ["var(--seq-2)", "25th–75th"], ["var(--seq-6)", "Median", 1]]) + '<div class="chart" id="cp_' + m + '"></div></div></div>';
+    h += '<div class="grid2"><div class="card"><h3>Lowest income in retirement, as % of year 1</h3><p class="sub">Distribution across lives (5-point bins).</p><div class="chart" id="ch_' + m + '"></div></div>';
+    h += '<div class="card"><h3>Example life #<span>' + Math.min(Math.max(1, num("pi") || 1), S0.n) + '</span></h3><p class="sub">Change <code>pi</code> to inspect another life. Dots mark guardrail raises (green) and cuts (red).</p>' + legend([["var(--seq-6)", "Income", 1], ["var(--series-3)", "Portfolio ÷ 20", 1]]) + '<div class="chart" id="ce_' + m + '"></div><details><summary>Year-by-year table</summary><div id="te_' + m + '"></div></details></div></div>';
+  });
+  out.innerHTML = h;
+  modes.forEach(function (m) {
+    var S = res[m], st = ST[m], ages = S.ages;
+    chart(document.getElementById("ci_" + m), { x: ages, bands: [{ lo: st.inc[0], hi: st.inc[4], color: "var(--seq-1)" }, { lo: st.inc[1], hi: st.inc[3], color: "var(--seq-2)" }], series: [{ y: st.inc[2], color: "var(--seq-6)" }, { y: S.guaranteed, color: "var(--text-muted)", dash: "4 3", width: 1.5 }], xLabel: "age",
+      tipRows: function (i) { return "<b>Age " + ages[i] + "</b><br>90th " + fmFull(st.inc[4][i]) + "<br>75th " + fmFull(st.inc[3][i]) + "<br>median " + fmFull(st.inc[2][i]) + "<br>25th " + fmFull(st.inc[1][i]) + "<br>10th " + fmFull(st.inc[0][i]) + "<br>Social Security " + fmFull(S.guaranteed[i]); } });
+    chart(document.getElementById("cp_" + m), { x: ages.map(function (a) { return a + 1; }), bands: [{ lo: st.port[0], hi: st.port[4], color: "var(--seq-1)" }, { lo: st.port[1], hi: st.port[3], color: "var(--seq-2)" }], series: [{ y: st.port[2], color: "var(--seq-6)" }], xLabel: "age",
+      tipRows: function (i) { return "<b>Age " + (ages[i] + 1) + "</b><br>90th " + fmFull(st.port[4][i]) + "<br>75th " + fmFull(st.port[3][i]) + "<br>median " + fmFull(st.port[2][i]) + "<br>25th " + fmFull(st.port[1][i]) + "<br>10th " + fmFull(st.port[0][i]); } });
+    var bins = [], cnt = []; for (var b = 0; b <= 20; b++) { bins.push(b * 5); cnt.push(0); }
+    for (var i = 0; i < S.n; i++) { var v = Math.min(100, Math.max(0, st.minRatio[i] * 100)); cnt[Math.min(20, Math.floor(v / 5 + 1e-9))]++; }
+    var lo = 0; while (lo < 19 && cnt[lo] === 0) lo++;
+    var bx = bins.slice(lo), bc = cnt.slice(lo).map(function (c) { return c / S.n; });
+    chart(document.getElementById("ch_" + m), { x: bx, bars: true, series: [{ y: bc }], yFmt: function (v) { return pc(v); }, xFmt: function (v) { return v + "%"; }, height: 220,
+      tipRows: function (i) { return "<b>" + (bx[i] === 100 ? "100% (never below year 1)" : bx[i] + "–" + (bx[i] + 5) + "%") + "</b><br>" + pc(bc[i], 1) + " of lives"; } });
+    // example life
+    var pi = Math.min(Math.max(1, num("pi") || 1), S.n) - 1, R = S.R, inc = [], prt = [], dots = [], rows = [];
+    for (var k = 0; k < R; k++) {
+      var o = pi * R + k; inc.push(S.income[o]); prt.push(S.port[o] / 20);
+      if (S.act[o] === 1) dots.push({ i: k, color: "var(--good)" }); if (S.act[o] === -1) dots.push({ i: k, color: "var(--critical)" });
+      rows.push("<tr><td>" + ages[k] + "</td><td>" + histYear(S.yrs[pi * S.N + S.firstRet + k]) + "</td><td>" + (isNaN(S.sr[o]) ? "–" : pc(S.sr[o])) + "</td><td>" +
+        (S.act[o] === 1 ? '<span class="pill up">▲ raise</span>' : S.act[o] === -1 ? '<span class="pill down">▼ cut</span>' : S.act[o] === 2 ? '<span class="pill init">● start</span>' : "") + "</td><td>" + fmFull(S.level[o]) + "</td><td>" + fmFull(S.income[o]) + "</td><td>" + fmFull(S.port[o]) + "</td></tr>");
+    }
+    chart(document.getElementById("ce_" + m), { x: ages, series: [{ y: inc, color: "var(--seq-6)", dots: dots }, { y: prt, color: "var(--series-3)", width: 1.5 }], xLabel: "age", height: 220,
+      tipRows: function (i) { var o = pi * R + i; return "<b>Age " + ages[i] + "</b> · returns from " + histYear(S.yrs[pi * S.N + S.firstRet + i]) + "<br>income " + fmFull(S.income[o]) + "<br>portfolio (end of year) " + fmFull(S.port[o]) + "<br>success rate " + (isNaN(S.sr[o]) ? "–" : pc(S.sr[o])) + (S.act[o] === 1 ? "<br><b>raise</b>" : S.act[o] === -1 ? "<br><b>cut</b>" : ""); } });
+    document.getElementById("te_" + m).innerHTML = "<table><thead><tr><th>Age</th><th>Return year</th><th>Success</th><th>Action</th><th>Base level</th><th>Income</th><th>End portfolio</th></tr></thead><tbody>" + rows.join("") + "</tbody></table>";
+  });
+}
+var CUR_DATA = [];
+function histYear(i) { return CUR_DATA[i] ? CUR_DATA[i].year : "?"; }
+
+/* ---------------- about ---------------- */
+function renderAbout() {
+  document.getElementById("out-about").innerHTML = '<div class="card" style="max-width:860px"><h3>How it works</h3>' +
+  "<p><b>Planner.</b> Works like FI Calc's backtest, starting today. Every historical period as long as your horizon (today until both of you reach your planning ages) is replayed: deposits until retirement, then spending minus Social Security drawn from the portfolio at the start of each year. Spending changes and lump sums apply at person 1's age. The <i>success rate</i> is the share of periods that never run out. Because the plan is linear in spending and in starting portfolio, the tool solves exactly for (a) the highest base spending that hits your target success rate and (b) the starting portfolio needed for your spending at that rate.</p>" +
+  "<p><b>Guardrails simulation</b> (risk-based guardrails, Kitces / Income Lab, 2024 parameters by default). Each simulated life gets its own sequence of real returns, built either by splicing random historical blocks or by taking one whole historical period. Each year of retirement:</p><ol>" +
+  "<li>Ages, years remaining, Social Security start dates and planned spending changes are all moved forward.</li>" +
+  "<li>The remaining plan, at the current spending level, is backtested over every historical period of the remaining length. This gives the current success rate.</li>" +
+  "<li>If success ≥ the upper guardrail (100%), spending is raised to the level that gives 80%. If success ≤ the lower guardrail (25%), it is cut to the level that gives 45%. Otherwise spending just keeps pace with inflation, so it stays the same in today's dollars.</li>" +
+  "<li>The year's spending is withdrawn and the portfolio earns that simulated year's return.</li></ol>" +
+  "<p><i>Set at retirement</i> sets the starting spending, at the 80% level, from each life's own portfolio on retirement day. <i>Locked in today</i> sets it now, from today's portfolio plus planned deposits; guardrails take over once you retire.</p>" +
+  "<p><b>Near the end of the plan</b> the remaining horizon gets short, the success rate climbs toward 100%, and the method raises spending to draw the portfolio down. That is how the method is designed, with the planning age as a hard stop. To be more conservative, set <code>mh</code> (min. years in success test) so the test always looks at least that many years ahead, or raise the planning ages.</p>" +
+  "<p><b>Conventions.</b> Everything is in today's dollars. Historical nominal returns are converted to real using CPI, and Social Security and spending rise with inflation. Returns are annual, the portfolio is rebalanced yearly, and the fee is taken from returns. Taxes are not modeled. A surplus (Social Security above spending) is reinvested. Social Security starts at the stated age while both spouses are alive. Survivor benefits are not modeled, since the planning age is fixed.</p>" +
+  "<p><b>Data.</b> Damodaran (NYU Stern) annual returns 1928–2025: S&P 500 with dividends, 3-month T-bill and 10-year T-bond. Inflation is Dec–Dec CPI-U (Shiller's CPI series through 2022, BLS for 2023–2025). Shiller 1871–2022 provides S&P total return and 10-year Treasury returns derived from GS10, January to January. Shiller has no T-bill series, so cash in those years uses the <code>cr</code> real return. Tip: <code>y0</code>/<code>y1</code> limit the years used.</p></div>";
+}
+
+/* ---------------- main loop ---------------- */
+function setTab(t) {
+  state.tab = t;
+  document.querySelectorAll("#tabs button").forEach(function (b) { b.classList.toggle("on", b.dataset.tab === t); b.setAttribute("aria-pressed", b.dataset.tab === t); });
+  ["plan", "sim", "about"].forEach(function (k) { document.getElementById("out-" + k).style.display = k === t ? "" : "none"; });
+  writeURL(); refresh(true);
+}
+var simDirty = true;
+function changed() { writeURL(); simDirty = true; refresh(false); }
+function refresh(immediate) {
+  document.getElementById("customrow").style.display = state.ds === "custom" ? "" : "none";
+  var ep = engineParams(), data = dataset(); CUR_DATA = data;
+  var errBox = document.getElementById("err");
+  var msgs = ep.errs.concat(data.length ? [] : ["No historical data in the selected dataset/years" + (state.ds === "custom" ? " – load a CSV." : ".")]);
+  var hard = msgs.filter(function (e) { return e.indexOf("Note:") !== 0; });
+  errBox.innerHTML = msgs.map(function (e) { return '<div class="' + (e.indexOf("Note:") === 0 ? "note" : "err") + '">' + esc(e) + "</div>"; }).join("");
+  if (hard.length) return;
+  if (state.tab === "plan") renderPlan(ep.p, data);
+  else if (state.tab === "sim") {
+    if (simDirty) { clearTimeout(simTimer); simTimer = setTimeout(function () { simDirty = false; runSim(ep.p, data); }, immediate ? 0 : 500); }
+    else renderSim();
+  } else renderAbout();
+}
+document.querySelectorAll("#tabs button").forEach(function (b) { b.addEventListener("click", function () { setTab(b.dataset.tab); }); });
+document.getElementById("copy").addEventListener("click", function () {
+  var u = location.href; var done = function () { document.getElementById("status").textContent = "Link copied"; };
+  if (navigator.clipboard) navigator.clipboard.writeText(u).then(done, function () { prompt("Copy this link:", u); }); else prompt("Copy this link:", u);
+});
+document.getElementById("reset").addEventListener("click", function () { history.replaceState(null, "", location.pathname + "?tab=" + state.tab); readURL(); buildForm(); changed(); });
+var rz; addEventListener("resize", function () { clearTimeout(rz); rz = setTimeout(function () { if (state.tab === "plan") refresh(true); else if (state.tab === "sim") renderSim(); }, 200); });
+readURL(); buildForm(); setTab(state.tab);
+</script>
+</body>
+</html>
