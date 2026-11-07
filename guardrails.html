@@ -289,6 +289,7 @@ var Engine = (function () {
     var rand = rng(p.seed + (mode === "today" ? 7919 : 0));
     var income = new Float64Array(n * R), level = new Float64Array(n * R), port = new Float64Array(n * R);
     var srArr = new Float64Array(n * R), act = new Int8Array(n * R), yrs = new Int16Array(n * N);
+    var F = sc.firstRet, prePort = new Float64Array(n * F); // pre-retirement end-of-year portfolio
     var portAtRet = new Float64Array(n), initL = new Float64Array(n), depl = new Int32Array(n), cuts = new Int32Array(n),
       raises = new Int32Array(n), worstCut = new Float64Array(n), endP = new Float64Array(n), firstIncome = new Float64Array(n);
     var cache0 = null;
@@ -334,13 +335,16 @@ var Engine = (function () {
         }
         P *= 1 + r[idx[k]];
         if (sc.retired[k]) port[path * R + ri] = P;
+        else if (k < F) prePort[path * F + k] = P;
       }
       depl[path] = depleted; cuts[path] = nc; raises[path] = nr; worstCut[path] = wc; endP[path] = P;
       if (progress && path % 50 === 0) progress(path / n);
     }
     return { mode: mode, n: n, R: R, N: N, firstRet: sc.firstRet, ages: sc.age1.slice(sc.firstRet), income: income, level: level, port: port, sr: srArr, act: act, yrs: yrs,
       portAtRet: portAtRet, initL: initL, depl: depl, cuts: cuts, raises: raises, worstCut: worstCut, endP: endP, firstIncome: firstIncome,
-      guaranteed: Array.from(sc.inc).slice(sc.firstRet), plannedA: Array.from(sc.a).slice(sc.firstRet), dchg: Array.from(sc.dchg).slice(sc.firstRet) };
+      guaranteed: Array.from(sc.inc).slice(sc.firstRet),
+      F: F, prePort: prePort, preAges: sc.age1.slice(0, F), preGuaranteed: Array.from(sc.inc).slice(0, F),
+      preDeposit: Array.from(sc.c).slice(0, F).map(function (v) { return -v; }), preLevel: mode === "today" ? Math.max(0, cache0) : NaN, plannedA: Array.from(sc.a).slice(sc.firstRet), dchg: Array.from(sc.dchg).slice(sc.firstRet) };
   }
 
   return { realReturns: realReturns, buildScenario: buildScenario, critL: critL, critP: critP, plan: plan, simulate: simulate, levelAt: levelAt, successAt: successAt, distL: distL };
@@ -564,8 +568,10 @@ function chart(el, o) {
   xt.forEach(function (t) { if (t < xs[0] || t > xs[n - 1]) return; s += '<text x="' + X(t) + '" y="' + (H - m.b + 16) + '" text-anchor="middle">' + (o.xFmt ? o.xFmt(t) : t) + "</text>"; });
   if (o.xLabel) s += '<text x="' + (W - m.r) + '" y="' + (H - 2) + '" text-anchor="end">' + o.xLabel + "</text>";
   (o.bands || []).forEach(function (b) {
-    var d = "M" + xs.map(function (x, i) { return X(x) + "," + Y(b.hi[i]); }).join("L") + "L" + xs.slice().reverse().map(function (x, j) { var i = n - 1 - j; return X(x) + "," + Y(b.lo[i]); }).join("L") + "Z";
-    s += '<path d="' + d + '" fill="' + b.color + '" fill-opacity="' + (b.opacity || 1) + '"/>';
+    var segs = [], cur = null;
+    for (var i = 0; i < n; i++) { if (isFinite(b.lo[i]) && isFinite(b.hi[i])) { if (!cur) segs.push(cur = []); cur.push(i); } else cur = null; }
+    var d = segs.map(function (sg) { return "M" + sg.map(function (i) { return X(xs[i]) + "," + Y(b.hi[i]); }).join("L") + "L" + sg.slice().reverse().map(function (i) { return X(xs[i]) + "," + Y(b.lo[i]); }).join("L") + "Z"; }).join("");
+    if (d) s += '<path d="' + d + '" fill="' + b.color + '" fill-opacity="' + (b.opacity || 1) + '"/>';
   });
   if (o.bars) {
     var bw = Math.max(1, (W - m.l - m.r) / n - 2);
@@ -721,10 +727,15 @@ function renderSim() {
   out.innerHTML = h;
   modes.forEach(function (m) {
     var S = res[m], st = ST[m], ages = S.ages;
-    chart(document.getElementById("ci_" + m), { x: ages, bands: [{ lo: st.inc[0], hi: st.inc[4], color: "var(--seq-1)" }, { lo: st.inc[1], hi: st.inc[3], color: "var(--seq-2)" }], series: [{ y: st.inc[2], color: "var(--seq-6)" }, { y: S.guaranteed, color: "var(--text-muted)", dash: "4 3", width: 1.5 }], xLabel: "age",
-      tipRows: function (i) { return "<b>Age " + ages[i] + "</b><br>90th " + fmFull(st.inc[4][i]) + "<br>75th " + fmFull(st.inc[3][i]) + "<br>median " + fmFull(st.inc[2][i]) + "<br>25th " + fmFull(st.inc[1][i]) + "<br>10th " + fmFull(st.inc[0][i]) + "<br>Social Security " + fmFull(S.guaranteed[i]); } });
-    chart(document.getElementById("cp_" + m), { x: ages.map(function (a) { return a + 1; }), bands: [{ lo: st.port[0], hi: st.port[4], color: "var(--seq-1)" }, { lo: st.port[1], hi: st.port[3], color: "var(--seq-2)" }], series: [{ y: st.port[2], color: "var(--seq-6)" }], xLabel: "age",
-      tipRows: function (i) { return "<b>Age " + (ages[i] + 1) + "</b><br>90th " + fmFull(st.port[4][i]) + "<br>75th " + fmFull(st.port[3][i]) + "<br>median " + fmFull(st.port[2][i]) + "<br>25th " + fmFull(st.port[1][i]) + "<br>10th " + fmFull(st.port[0][i]); } });
+    // pre-retirement years (today until retirement) prepended to the age charts
+    var F = S.F || 0, allAges = (S.preAges || []).concat(ages), nanPre = []; for (var f = 0; f < F; f++) nanPre.push(NaN);
+    var preQ = [.1, .25, .5, .75, .9].map(function (q) { var a = []; for (var k = 0; k < F; k++) { var c = new Float64Array(S.n); for (var i = 0; i < S.n; i++) c[i] = S.prePort[i * F + k]; a.push(quant(c, q)); } return a; });
+    var incA = st.inc.map(function (a) { return nanPre.concat(a); }), portA = st.port.map(function (a, j) { return preQ[j].concat(a); }), gA = (S.preGuaranteed || []).concat(S.guaranteed);
+    var retV = F > 0 ? [{ x: ages[0], label: "retire" }] : [], retVp = F > 0 ? [{ x: ages[0] + 0.5, label: "retire" }] : [];
+    chart(document.getElementById("ci_" + m), { x: allAges, bands: [{ lo: incA[0], hi: incA[4], color: "var(--seq-1)" }, { lo: incA[1], hi: incA[3], color: "var(--seq-2)" }], series: [{ y: incA[2], color: "var(--seq-6)" }, { y: gA, color: "var(--text-muted)", dash: "4 3", width: 1.5 }], vlines: retV, xLabel: "age",
+      tipRows: function (i) { if (i < F) return "<b>Age " + allAges[i] + "</b> · before retirement<br>deposit " + fmFull(S.preDeposit[i]) + "<br>Social Security " + fmFull(gA[i]); return "<b>Age " + allAges[i] + "</b><br>90th " + fmFull(incA[4][i]) + "<br>75th " + fmFull(incA[3][i]) + "<br>median " + fmFull(incA[2][i]) + "<br>25th " + fmFull(incA[1][i]) + "<br>10th " + fmFull(incA[0][i]) + "<br>Social Security " + fmFull(gA[i]); } });
+    chart(document.getElementById("cp_" + m), { x: allAges.map(function (a) { return a + 1; }), bands: [{ lo: portA[0], hi: portA[4], color: "var(--seq-1)" }, { lo: portA[1], hi: portA[3], color: "var(--seq-2)" }], series: [{ y: portA[2], color: "var(--seq-6)" }], vlines: retVp, xLabel: "age",
+      tipRows: function (i) { return "<b>Age " + (allAges[i] + 1) + "</b>" + (i < F ? " · before retirement" : "") + "<br>90th " + fmFull(portA[4][i]) + "<br>75th " + fmFull(portA[3][i]) + "<br>median " + fmFull(portA[2][i]) + "<br>25th " + fmFull(portA[1][i]) + "<br>10th " + fmFull(portA[0][i]); } });
     var bins = [], cnt = []; for (var b = 0; b <= 20; b++) { bins.push(b * 5); cnt.push(0); }
     for (var i = 0; i < S.n; i++) { var v = Math.min(100, Math.max(0, st.minRatio[i] * 100)); cnt[Math.min(20, Math.floor(v / 5 + 1e-9))]++; }
     var lo = 0; while (lo < 19 && cnt[lo] === 0) lo++;
@@ -733,14 +744,18 @@ function renderSim() {
       tipRows: function (i) { return "<b>" + (bx[i] === 100 ? "100% (never below year 1)" : bx[i] + "–" + (bx[i] + 5) + "%") + "</b><br>" + pc(bc[i], 1) + " of lives"; } });
     // example life
     var pi = Math.min(Math.max(1, num("pi") || 1), S.n) - 1, R = S.R, inc = [], prt = [], dots = [], rows = [];
-    for (var k = 0; k < R; k++) {
+    for (var k = 0; k < F; k++) {
+      var pp = S.prePort[pi * F + k]; inc.push(NaN); prt.push(pp / 20);
+      rows.push("<tr><td>" + allAges[k] + "</td><td>" + histYear(S.yrs[pi * S.N + k]) + "</td><td>–</td><td>deposit " + fmFull(S.preDeposit[k]) + "</td><td>" + (isNaN(S.preLevel) ? "–" : fmFull(S.preLevel)) + "</td><td>–</td><td>" + fmFull(pp) + "</td></tr>");
+    }
+    for (k = 0; k < R; k++) {
       var o = pi * R + k; inc.push(S.income[o]); prt.push(S.port[o] / 20);
-      if (S.act[o] === 1) dots.push({ i: k, color: "var(--good)" }); if (S.act[o] === -1) dots.push({ i: k, color: "var(--critical)" });
+      if (S.act[o] === 1) dots.push({ i: F + k, color: "var(--good)" }); if (S.act[o] === -1) dots.push({ i: F + k, color: "var(--critical)" });
       rows.push("<tr><td>" + ages[k] + "</td><td>" + histYear(S.yrs[pi * S.N + S.firstRet + k]) + "</td><td>" + (isNaN(S.sr[o]) ? "–" : pc(S.sr[o])) + "</td><td>" +
         (S.act[o] === 1 ? '<span class="pill up">▲ raise</span>' : S.act[o] === -1 ? '<span class="pill down">▼ cut</span>' : S.act[o] === 2 ? '<span class="pill init">● start</span>' : "") + "</td><td>" + fmFull(S.level[o]) + "</td><td>" + fmFull(S.income[o]) + "</td><td>" + fmFull(S.port[o]) + "</td></tr>");
     }
-    chart(document.getElementById("ce_" + m), { x: ages, series: [{ y: inc, color: "var(--seq-6)", dots: dots }, { y: prt, color: "var(--series-3)", width: 1.5 }], xLabel: "age", height: 220,
-      tipRows: function (i) { var o = pi * R + i; return "<b>Age " + ages[i] + "</b> · returns from " + histYear(S.yrs[pi * S.N + S.firstRet + i]) + "<br>income " + fmFull(S.income[o]) + "<br>portfolio (end of year) " + fmFull(S.port[o]) + "<br>success rate " + (isNaN(S.sr[o]) ? "–" : pc(S.sr[o])) + (S.act[o] === 1 ? "<br><b>raise</b>" : S.act[o] === -1 ? "<br><b>cut</b>" : ""); } });
+    chart(document.getElementById("ce_" + m), { x: allAges, series: [{ y: inc, color: "var(--seq-6)", dots: dots }, { y: prt, color: "var(--series-3)", width: 1.5 }], vlines: retV, xLabel: "age", height: 220,
+      tipRows: function (i) { if (i < F) return "<b>Age " + allAges[i] + "</b> · returns from " + histYear(S.yrs[pi * S.N + i]) + " · before retirement<br>deposit " + fmFull(S.preDeposit[i]) + "<br>portfolio (end of year) " + fmFull(S.prePort[pi * F + i]) + (isNaN(S.preLevel) ? "" : "<br>locked-in base level " + fmFull(S.preLevel)); i -= F; var o = pi * R + i; return "<b>Age " + ages[i] + "</b> · returns from " + histYear(S.yrs[pi * S.N + S.firstRet + i]) + "<br>income " + fmFull(S.income[o]) + "<br>portfolio (end of year) " + fmFull(S.port[o]) + "<br>success rate " + (isNaN(S.sr[o]) ? "–" : pc(S.sr[o])) + (S.act[o] === 1 ? "<br><b>raise</b>" : S.act[o] === -1 ? "<br><b>cut</b>" : ""); } });
     document.getElementById("te_" + m).innerHTML = "<table><thead><tr><th>Age</th><th>Return year</th><th>Success</th><th>Action</th><th>Base level</th><th>Income</th><th>End portfolio</th></tr></thead><tbody>" + rows.join("") + "</tbody></table>";
   });
 }
