@@ -132,13 +132,14 @@ var Engine = (function () {
     N = Math.max(1, Math.round(N));
     var mh = Math.max(0, Math.round(p.mh || 0)), Next = N + mh;
     var a = new Float64Array(Next), c = new Float64Array(Next), dchg = new Float64Array(Next),
-      inc = new Float64Array(Next), retired = new Uint8Array(Next), tEnd = new Uint8Array(Next), age1 = [], age2 = [];
+      inc = new Float64Array(Next), retired = new Uint8Array(Next), tEnd = new Uint8Array(Next), pen = new Float64Array(Next), age1 = [], age2 = [];
     var firstRet = -1;
     for (var k = 0; k < Next; k++) {
       var g1 = p.a1 + k, g2 = p.a2 != null ? p.a2 + k : null;
       age1.push(g1); age2.push(g2);
       var ret = g1 >= p.ra;
       retired[k] = ret ? 1 : 0;
+      pen[k] = k < (p.penN || 0) ? (p.pen || 0) : 0; // real-return penalty in the first penN plan years (from today)
       tEnd[k] = (ret ? p.wEnd : p.dEnd) ? 1 : 0; // year's flows at end (Dec 31) instead of start (Jan 1)
       if (ret && firstRet < 0 && k < N) firstRet = k;
       var ss = 0;
@@ -167,7 +168,7 @@ var Engine = (function () {
         c[k] = -contrib - ss - lump;
       }
     }
-    return { N: N, mh: mh, Next: Next, a: a, c: c, dchg: dchg, inc: inc, retired: retired, tEnd: tEnd, firstRet: firstRet, age1: age1, age2: age2 };
+    return { N: N, mh: mh, Next: Next, a: a, c: c, dchg: dchg, inc: inc, retired: retired, tEnd: tEnd, pen: pen, firstRet: firstRet, age1: age1, age2: age2 };
   }
 
   // critical spending level for one historical sequence starting at hist index s,
@@ -177,13 +178,13 @@ var Engine = (function () {
     var H = hz(k, sc), inv = 1, A = 0, C = 0, best = Infinity;
     for (var j = 0; j < H; j++) {
       var e = sc.tEnd[k + j];
-      if (e) inv /= (1 + r[s + j]);
+      if (e) inv /= (1 + r[s + j] + sc.pen[k + j]);
       A += sc.a[k + j] * inv;
       C += sc.c[k + j] * inv;
       var room = P - C;
       if (A > 1e-12) { var v = room / A; if (v < best) best = v; }
       else if (room < -1e-9) return -Infinity;
-      if (!e) inv /= (1 + r[s + j]);
+      if (!e) inv /= (1 + r[s + j] + sc.pen[k + j]);
     }
     return best;
   }
@@ -191,10 +192,10 @@ var Engine = (function () {
     var H = hz(k, sc), inv = 1, need = 0, best = 0;
     for (var j = 0; j < H; j++) {
       var e = sc.tEnd[k + j];
-      if (e) inv /= (1 + r[s + j]);
+      if (e) inv /= (1 + r[s + j] + sc.pen[k + j]);
       need += (L * sc.a[k + j] + sc.c[k + j]) * inv;
       if (need > best) best = need;
-      if (!e) inv /= (1 + r[s + j]);
+      if (!e) inv /= (1 + r[s + j] + sc.pen[k + j]);
     }
     return best;
   }
@@ -242,11 +243,11 @@ var Engine = (function () {
     for (s = 0; s < n; s++) {
       var P = p.p0, path = [], failed = -1;
       for (var k = 0; k < sc.N; k++) {
-        if (sc.tEnd[k]) P *= 1 + r[s + k];
+        if (sc.tEnd[k]) P *= 1 + r[s + k] + sc.pen[k];
         P -= (sc.retired[k] ? p.spend * sc.a[k] : 0) + sc.c[k];
         if (P < 0 && failed < 0) failed = k;
         if (P < 0) P = 0;
-        if (!sc.tEnd[k]) P *= 1 + r[s + k];
+        if (!sc.tEnd[k]) P *= 1 + r[s + k] + sc.pen[k];
         path.push(P);
       }
       paths.push(path); ends.push({ year: data[s].year, end: P, failed: failed, maxSpend: Ls[s], needP: Ps[s] });
@@ -330,7 +331,7 @@ var Engine = (function () {
           if (ri === 0) initL[path] = L;
         }
         var endT = sc.tEnd[k];
-        if (endT) P *= 1 + r[idx[k]];
+        if (endT) P *= 1 + r[idx[k]] + sc.pen[k];
         if (sc.retired[k]) {
           var w = L * sc.a[k] + sc.c[k];
           var inc = L * sc.a[k] + sc.dchg[k];
@@ -343,7 +344,7 @@ var Engine = (function () {
           P -= sc.c[k];
           if (P < 0) P = 0;
         }
-        if (!endT) P *= 1 + r[idx[k]];
+        if (!endT) P *= 1 + r[idx[k]] + sc.pen[k];
         if (sc.retired[k]) port[path * R + ri] = P;
         else if (k < F) prePort[path * F + k] = P;
       }
@@ -405,6 +406,8 @@ var SCHEMA = [
     ["bnd", "Bonds (10y Treasury) %", "num", 0],
     ["csh", "Cash (3-mo T-bill) %", "num", 20],
     ["fee", "Annual fee %", "num", 0.05],
+    ["rp", "Real return penalty (pct points)", "num", -3, "Added to the portfolio's real return (after fee) in each penalty year. e.g. 1% real with −0.75 → 0.25%. 0 = off."],
+    ["rpy", "Penalty years (N)", "int", 10, "First N plan years, counted from today (the age you entered). Applies everywhere: Planner, simulated returns and every guardrail test."],
   ]],
   ["Guardrails (Kitces / Income Lab)", [
     ["gi", "Initial spending at success %", "num", 80],
@@ -421,7 +424,7 @@ var SCHEMA = [
     ["bl", "Block length (years)", "int", 10],
     ["wrap", "Whole period: wrap around end of data", "sel", "1", [["1", "Yes"], ["0", "No"]]],
     ["seed", "Random seed", "int", 1],
-    ["pb", "Income bands (% of year-1 income)", "txt", "95,90,80,70,60"],
+    ["pb", "Income bands (% of first-year income)", "txt", "95,90,80,70,60"],
     ["db", "Income floors ($, today's)", "txt", "90000,80000,70000,60000"],
     ["pi", "Example life # to inspect", "int", 1],
   ]],
@@ -529,12 +532,12 @@ function engineParams() {
     p0: num("p"), contrib: num("c"), cg: num("cg") / 100, spend: num("s"), tgt: num("tgt") / 100,
     ss: [{ amt: num("ss1"), age: num("ssa1"), who: 1 }].concat(single ? [] : [{ amt: num("ss2"), age: num("ssa2"), who: 2 }]),
     chg: chg.items, lumps: lump.items.map(function (x) { return { age: x.from, amt: x.amt }; }),
-    alloc: { s: num("stk"), b: num("bnd"), c: num("csh") }, fee: num("fee") / 100, cashReal: num("cr") / 100,
+    alloc: { s: num("stk"), b: num("bnd"), c: num("csh") }, fee: num("fee") / 100, cashReal: num("cr") / 100, pen: num("rp") / 100, penN: Math.max(0, Math.round(num("rpy"))),
     gi: num("gi") / 100, gu: num("gu") / 100, gut: num("gut") / 100, gl: num("gl") / 100, glt: num("glt") / 100, mh: num("mh"),
     dEnd: state.dt !== "begin", wEnd: state.wt === "end",
     n: Math.max(10, Math.min(20000, num("n"))), rm: state.rm, bl: num("bl"), wrap: state.wrap === "1", seed: num("seed")
   };
-  ["a1", "pa1", "ra", "p0", "contrib", "spend", "tgt", "fee", "gi", "gu", "gut", "gl", "glt", "n", "bl", "seed"].forEach(function (k) { if (isNaN(p[k])) errs.push("Field " + k + " is not a number."); });
+  ["a1", "pa1", "ra", "p0", "contrib", "spend", "tgt", "fee", "pen", "penN", "gi", "gu", "gut", "gl", "glt", "n", "bl", "seed"].forEach(function (k) { if (isNaN(p[k])) errs.push("Field " + k + " is not a number."); });
   if (!single) ["a2", "pa2"].forEach(function (k) { if (isNaN(p[k])) errs.push("Field " + k + " is not a number."); });
   p.ss.forEach(function (s) { if (isNaN(s.amt) || isNaN(s.age)) errs.push("Social Security fields must be numbers."); });
   if (p.alloc.s + p.alloc.b + p.alloc.c <= 0) errs.push("Allocation must add to more than 0%.");
@@ -615,9 +618,14 @@ function chart(el, o) {
 function legend(items) { return '<div class="legendrow">' + items.map(function (it) { return '<span><span class="sw" style="background:' + it[0] + (it[2] ? ";height:2px;vertical-align:3px" : "") + '"></span>' + it[1] + "</span>"; }).join("") + "</div>"; }
 
 /* ---------------- Planner tab ---------------- */
+function penNote() {
+  var pv = num("rp"), n = Math.max(0, Math.round(num("rpy"))), a = num("a1");
+  if (!pv || !n) return "";
+  return " Real returns are " + (pv < 0 ? "reduced" : "increased") + " by " + Math.abs(pv) + " percentage points in the first " + n + " plan year" + (n > 1 ? "s" : "") + " (ages " + a + "–" + (a + n - 1) + "), in every backtest and guardrail test.";
+}
 function ageNote() {
   var d = state.dt === "begin" ? "Jan 1 (before the year's return)" : "Dec 31 (after the year's return)", w = state.wt === "end" ? "Dec 31 (after the year's return)" : "Jan 1 (before the year's return)";
-  return "Ages are person 1's age on Jan 1, and each plan year is a calendar year. Deposits before retirement happen on " + d + "; withdrawals in retirement happen on " + w + ". Social Security and lump sums move with that year's deposit or withdrawal. Portfolio charts start at your age with exactly the portfolio you entered; each later point is the Jan 1 balance (= the Dec 31 balance of the year before).";
+  return "Ages are person 1's age on Jan 1, and each plan year is a calendar year. Deposits before retirement happen on " + d + "; withdrawals in retirement happen on " + w + ". Social Security and lump sums move with that year's deposit or withdrawal. Portfolio charts start at your age with exactly the portfolio you entered; each later point is the Jan 1 balance (= the Dec 31 balance of the year before)." + penNote();
 }
 function renderPlan(p, data) {
   var out = document.getElementById("out-plan");
@@ -678,18 +686,23 @@ function runSim(p, data) {
 var MODE_NAME = { retire: "Spending set at retirement", today: "Spending locked in today" };
 function stats(S, bandsPct, floors) {
   var n = S.n, R = S.R, st = { bandsPct: [], floors: [] };
+  // first year with income: first retirement year whose base spending is not turned off (e.g. -100%) by spending changes
+  var fi = 0; while (fi < R - 1 && !(S.plannedA[fi] > 0)) fi++;
+  if (!(S.plannedA[fi] > 0)) fi = 0;
+  var base = new Float64Array(n); for (var i0 = 0; i0 < n; i0++) base[i0] = S.income[i0 * R + fi];
+  st.fi = fi; st.fiAge = S.ages[fi]; st.base = base;
   bandsPct.forEach(function (b) {
     var ever = 0, yrs = 0, lvlEver = 0;
-    for (var i = 0; i < n; i++) { var f = S.firstIncome[i] * b / 100, e = false, le = false; for (var k = 0; k < R; k++) { var o = i * R + k; if (S.income[o] < f - 0.5) { yrs++; e = true; } if (S.level[o] < S.initL[i] * b / 100 - 0.5) le = true; } if (e) ever++; if (le) lvlEver++; }
-    st.bandsPct.push({ b: b, ever: ever / n, yrs: yrs / (n * R), lvl: lvlEver / n });
+    for (var i = 0; i < n; i++) { var f = base[i] * b / 100, e = false, le = false; for (var k = 0; k < R; k++) { var o = i * R + k; if (k >= fi && S.income[o] < f - 0.5) { yrs++; e = true; } if (S.level[o] < S.initL[i] * b / 100 - 0.5) le = true; } if (e) ever++; if (le) lvlEver++; }
+    st.bandsPct.push({ b: b, ever: ever / n, yrs: yrs / (n * (R - fi)), lvl: lvlEver / n });
   });
   floors.forEach(function (d) {
     var ever = 0, yrs = 0, first = [];
-    for (var i = 0; i < n; i++) { var e = false; for (var k = 0; k < R; k++) if (S.income[i * R + k] < d - 0.5) { yrs++; if (!e) first.push(S.ages[k]); e = true; } if (e) ever++; }
-    st.floors.push({ d: d, ever: ever / n, yrs: yrs / (n * R), medAge: first.length ? quant(first, .5) : NaN });
+    for (var i = 0; i < n; i++) { var e = false; for (var k = fi; k < R; k++) if (S.income[i * R + k] < d - 0.5) { yrs++; if (!e) first.push(S.ages[k]); e = true; } if (e) ever++; }
+    st.floors.push({ d: d, ever: ever / n, yrs: yrs / (n * (R - fi)), medAge: first.length ? quant(first, .5) : NaN });
   });
   var minRatio = new Float64Array(n), avgInc = new Float64Array(n);
-  for (var i = 0; i < n; i++) { var mn = Infinity, sm = 0; for (var k = 0; k < R; k++) { var v = S.income[i * R + k]; if (v < mn) mn = v; sm += v; } minRatio[i] = S.firstIncome[i] > 0 ? mn / S.firstIncome[i] : 1; avgInc[i] = sm / R; }
+  for (var i = 0; i < n; i++) { var mn = Infinity, sm = 0; for (var k = 0; k < R; k++) { var v = S.income[i * R + k]; if (k >= fi) { if (v < mn) mn = v; sm += v; } } minRatio[i] = base[i] > 0 ? mn / base[i] : 1; avgInc[i] = sm / (R - fi); }
   st.minRatio = minRatio; st.avgInc = avgInc;
   st.anyCut = Array.prototype.filter.call(S.cuts, function (c) { return c > 0; }).length / n;
   st.avgCuts = Array.prototype.reduce.call(S.cuts, function (a, b) { return a + b; }, 0) / n;
@@ -709,36 +722,37 @@ function renderSim() {
   var pb = String(state.pb).split(/[,\s]+/).map(parseFloat).filter(isFinite), db = String(state.db).split(/[,\s]+/).map(function (x) { return parseFloat(x.replace(/[$_]/g, "")); }).filter(isFinite);
   var ST = {}; modes.forEach(function (m) { ST[m] = stats(res[m], pb, db); });
   var S0 = res[modes[0]];
+  var fiNote = "First-year income = income at age " + ST[modes[0]].fiAge + ", the first retirement year whose base spending is not turned off (e.g. −100%) by spending changes" + (ST[modes[0]].fi > 0 ? "; the " + ST[modes[0]].fi + " retirement year(s) before it are left out of this analysis" : "") + ".";
   var h = '<p class="note">' + S0.n.toLocaleString() + " simulated lives, " + S0.R + " retirement years each (ages " + S0.ages[0] + "–" + S0.ages[S0.R - 1] + "). Income = total spending including Social Security, in today's dollars. Returns: " +
     (p.rm === "block" ? "random " + p.bl + "-year historical blocks spliced together" : "one random whole historical period" + (p.wrap ? " (wrapping past the end of the data)" : "")) + ". Each year the guardrail test backtests the remaining plan over every historical period.</p><p class=\"note\">" + ageNote() + "</p>";
   // summary table across modes
   var rowsT = [
-    ["Year-1 retirement income (median)", function (m) { return fm(quant(res[m].firstIncome, .5)); }],
-    ["Year-1 income, 10th–90th pct", function (m) { return fm(quant(res[m].firstIncome, .1)) + " – " + fm(quant(res[m].firstIncome, .9)); }],
+    ["First-year income (median), age " + ST[modes[0]].fiAge, function (m) { return fm(quant(ST[m].base, .5)); }],
+    ["First-year income, 10th–90th pct", function (m) { return fm(quant(ST[m].base, .1)) + " – " + fm(quant(ST[m].base, .9)); }],
     ["Portfolio at retirement (median)", function (m) { return fm(quant(res[m].portAtRet, .5)); }],
-    ["Average annual income (median life)", function (m) { return fm(quant(ST[m].avgInc, .5)); }],
+    ["Average annual income from age " + ST[modes[0]].fiAge + " (median life)", function (m) { return fm(quant(ST[m].avgInc, .5)); }],
     ["Lives with at least one cut", function (m) { return pc(ST[m].anyCut); }],
     ["Average cuts / raises per life", function (m) { return ST[m].avgCuts.toFixed(1) + " / " + ST[m].avgRaises.toFixed(1); }],
     ["Largest single cut (median of lives with a cut)", function (m) { var a = Array.prototype.filter.call(res[m].worstCut, function (x) { return x > 0; }); return a.length ? pc(quant(a, .5)) : "–"; }],
     ["Largest single cut (90th pct)", function (m) { var a = Array.prototype.filter.call(res[m].worstCut, function (x) { return x > 0; }); return a.length ? pc(quant(a, .9)) : "–"; }],
-    ["Lowest income vs year 1 (median / 10th pct)", function (m) { return pc(quant(ST[m].minRatio, .5)) + " / " + pc(quant(ST[m].minRatio, .1)); }],
+    ["Lowest income vs first-year income (median / 10th pct)", function (m) { return pc(quant(ST[m].minRatio, .5)) + " / " + pc(quant(ST[m].minRatio, .1)); }],
     ["Portfolio ran out", function (m) { return pc(ST[m].depl, 1); }],
     ["Ending portfolio (median)", function (m) { return fm(quant(res[m].endP, .5)); }],
   ];
   h += '<div class="card"><h3>Summary</h3><table><thead><tr><th></th>' + modes.map(function (m) { return "<th>" + MODE_NAME[m] + "</th>"; }).join("") + "</tr></thead><tbody>" +
     rowsT.map(function (r) { return "<tr><td>" + r[0] + "</td>" + modes.map(function (m) { return "<td>" + r[1](m) + "</td>"; }).join("") + "</tr>"; }).join("") + "</tbody></table></div>";
   // bands
-  h += '<div class="grid2"><div class="card"><h3>Income below a share of year-1 income</h3><p class="sub">"Ever" = share of lives that dip below the band at least once. "Years" = share of all retirement years spent below it. "Guardrail level" ignores your planned spending changes and Social Security and compares only the guardrail spending level to its starting value.</p><table><thead><tr><th>Band</th>' +
+  h += '<div class="grid2"><div class="card"><h3>Income below a share of first-year income</h3><p class="sub">' + fiNote + ' "Ever" = share of lives that dip below the band at least once. "Years" = share of retirement years from that age on spent below it. "Guardrail level" ignores your planned spending changes and Social Security and compares only the guardrail spending level to its starting value.</p><table><thead><tr><th>Band</th>' +
     modes.map(function (m) { return '<th colspan="3">' + MODE_NAME[m] + "</th>"; }).join("") + "</tr><tr><th></th>" + modes.map(function () { return "<th>Ever</th><th>Years</th><th>Guardrail level</th>"; }).join("") + "</tr></thead><tbody>" +
     pb.map(function (b, bi) { return "<tr><td>&lt; " + b + "%</td>" + modes.map(function (m) { var x = ST[m].bandsPct[bi]; return "<td>" + pc(x.ever, 1) + "</td><td>" + pc(x.yrs, 1) + "</td><td>" + pc(x.lvl, 1) + "</td>"; }).join("") + "</tr>"; }).join("") + "</tbody></table></div>";
-  h += '<div class="card"><h3>Income below dollar floors</h3><p class="sub">Total income, including Social Security, in today\'s dollars. "First age" = median age when income first falls below the floor, among lives where it does.</p><table><thead><tr><th>Floor</th>' +
+  h += '<div class="card"><h3>Income below dollar floors</h3><p class="sub">Total income, including Social Security, in today\'s dollars, from age ' + ST[modes[0]].fiAge + ' on (the first year with income). "First age" = median age when income first falls below the floor, among lives where it does.</p><table><thead><tr><th>Floor</th>' +
     modes.map(function (m) { return '<th colspan="3">' + MODE_NAME[m] + "</th>"; }).join("") + "</tr><tr><th></th>" + modes.map(function () { return "<th>Ever</th><th>Years</th><th>First age</th>"; }).join("") + "</tr></thead><tbody>" +
     db.map(function (d, di) { return "<tr><td>&lt; " + fmFull(d) + "</td>" + modes.map(function (m) { var x = ST[m].floors[di]; return "<td>" + pc(x.ever, 1) + "</td><td>" + pc(x.yrs, 1) + "</td><td>" + (isNaN(x.medAge) ? "–" : Math.round(x.medAge)) + "</td>"; }).join("") + "</tr>"; }).join("") + "</tbody></table></div></div>";
   modes.forEach(function (m) {
     h += '<div class="modehdr">' + MODE_NAME[m] + "</div>";
     h += '<div class="grid2"><div class="card"><h3>Income by age</h3><p class="sub">Percentiles across simulated lives. Each point is the income for the calendar year starting at that age. The dashed line is Social Security alone.</p>' + legend([["var(--seq-1)", "10th–90th"], ["var(--seq-2)", "25th–75th"], ["var(--seq-6)", "Median", 1], ["var(--text-muted)", "Social Security", 1]]) + '<div class="chart" id="ci_' + m + '"></div></div>';
     h += '<div class="card"><h3>Portfolio by age</h3><p class="sub">Percentiles across simulated lives, in today\'s dollars. The first point is today\'s portfolio at your current age; each later point is the Jan 1 balance at that age (= Dec 31 of the year before).</p>' + legend([["var(--seq-1)", "10th–90th"], ["var(--seq-2)", "25th–75th"], ["var(--seq-6)", "Median", 1]]) + '<div class="chart" id="cp_' + m + '"></div></div></div>';
-    h += '<div class="grid2"><div class="card"><h3>Lowest income in retirement, as % of year 1</h3><p class="sub">Distribution across lives (5-point bins).</p><div class="chart" id="ch_' + m + '"></div></div>';
+    h += '<div class="grid2"><div class="card"><h3>Lowest income in retirement, as % of first-year income</h3><p class="sub">Distribution across lives (5-point bins). Lowest income from age ' + ST[m].fiAge + ' on.</p><div class="chart" id="ch_' + m + '"></div></div>';
     h += '<div class="card"><h3>Example life #<span>' + Math.min(Math.max(1, num("pi") || 1), S0.n) + '</span></h3><p class="sub">Change <code>pi</code> to inspect another life. Dots mark guardrail raises (green) and cuts (red). Income is for the year starting at each age; the portfolio is the Jan 1 balance at each age, starting from today\'s portfolio.</p>' + legend([["var(--seq-6)", "Income", 1], ["var(--series-3)", "Portfolio ÷ 20", 1]]) + '<div class="chart" id="ce_' + m + '"></div><details><summary>Year-by-year table</summary><div id="te_' + m + '"></div></details></div></div>';
   });
   out.innerHTML = h;
@@ -758,23 +772,24 @@ function renderSim() {
     var lo = 0; while (lo < 19 && cnt[lo] === 0) lo++;
     var bx = bins.slice(lo), bc = cnt.slice(lo).map(function (c) { return c / S.n; });
     chart(document.getElementById("ch_" + m), { x: bx, bars: true, series: [{ y: bc }], yFmt: function (v) { return pc(v); }, xFmt: function (v) { return v + "%"; }, height: 220,
-      tipRows: function (i) { return "<b>" + (bx[i] === 100 ? "100% (never below year 1)" : bx[i] + "–" + (bx[i] + 5) + "%") + "</b><br>" + pc(bc[i], 1) + " of lives"; } });
+      tipRows: function (i) { return "<b>" + (bx[i] === 100 ? "100% (never below first-year income)" : bx[i] + "–" + (bx[i] + 5) + "%") + "</b><br>" + pc(bc[i], 1) + " of lives"; } });
     // example life
     var dWhen = state.dt === "begin" ? " (Jan 1)" : " (Dec 31)";
+    var penN = Math.max(0, Math.round(num("rpy"))), penV = num("rp"), penTag = function (k) { return penV && k < penN ? " (" + (penV > 0 ? "+" : "−") + Math.abs(penV) + " pts)" : ""; };
     var pi = Math.min(Math.max(1, num("pi") || 1), S.n) - 1, R = S.R, inc = [], prt = [p.p0], dots = [], rows = [];
     for (var k = 0; k < F; k++) {
       var pp = S.prePort[pi * F + k]; inc.push(NaN); prt.push(pp);
-      rows.push("<tr><td>" + allAges[k] + "</td><td>" + histYear(S.yrs[pi * S.N + k]) + "</td><td>–</td><td>deposit " + fmFull(S.preDeposit[k]) + dWhen + "</td><td>" + (isNaN(S.preLevel) ? "–" : fmFull(S.preLevel)) + "</td><td>–</td><td>" + fmFull(pp) + "</td></tr>");
+      rows.push("<tr><td>" + allAges[k] + "</td><td>" + histYear(S.yrs[pi * S.N + k]) + penTag(k) + "</td><td>–</td><td>deposit " + fmFull(S.preDeposit[k]) + dWhen + "</td><td>" + (isNaN(S.preLevel) ? "–" : fmFull(S.preLevel)) + "</td><td>–</td><td>" + fmFull(pp) + "</td></tr>");
     }
     for (k = 0; k < R; k++) {
       var o = pi * R + k; inc.push(S.income[o]); prt.push(S.port[o]);
       if (S.act[o] === 1) dots.push({ i: F + k, color: "var(--good)" }); if (S.act[o] === -1) dots.push({ i: F + k, color: "var(--critical)" });
-      rows.push("<tr><td>" + ages[k] + "</td><td>" + histYear(S.yrs[pi * S.N + S.firstRet + k]) + "</td><td>" + (isNaN(S.sr[o]) ? "–" : pc(S.sr[o])) + "</td><td>" +
+      rows.push("<tr><td>" + ages[k] + "</td><td>" + histYear(S.yrs[pi * S.N + S.firstRet + k]) + penTag(F + k) + "</td><td>" + (isNaN(S.sr[o]) ? "–" : pc(S.sr[o])) + "</td><td>" +
         (S.act[o] === 1 ? '<span class="pill up">▲ raise</span>' : S.act[o] === -1 ? '<span class="pill down">▼ cut</span>' : S.act[o] === 2 ? '<span class="pill init">● start</span>' : "") + "</td><td>" + fmFull(S.level[o]) + "</td><td>" + fmFull(S.income[o]) + "</td><td>" + fmFull(S.port[o]) + "</td></tr>");
     }
     var exAges = allAges.concat([allAges[allAges.length - 1] + 1]); inc.push(NaN);
     chart(document.getElementById("ce_" + m), { x: exAges, series: [{ y: inc, color: "var(--seq-6)", dots: dots }, { y: prt.map(function (v) { return v / 20; }), color: "var(--series-3)", width: 1.5 }], vlines: retV, xLabel: "age on Jan 1", height: 220,
-      tipRows: function (i) { var hd = "<b>Age " + exAges[i] + " on Jan 1</b>", bal = "<br>portfolio Jan 1 " + fmFull(prt[i]) + (i === 0 ? " (today's portfolio)" : ""); if (i >= F + R) return hd + " · end of plan" + bal; if (i < F) return hd + " · returns from " + histYear(S.yrs[pi * S.N + i]) + " · before retirement" + bal + "<br>deposit " + fmFull(S.preDeposit[i]) + dWhen + (isNaN(S.preLevel) ? "" : "<br>locked-in base level " + fmFull(S.preLevel)); i -= F; var o = pi * R + i; return hd + " · returns from " + histYear(S.yrs[pi * S.N + S.firstRet + i]) + bal + "<br>income " + fmFull(S.income[o]) + "<br>withdrawal " + (state.wt === "end" ? "Dec 31" : "Jan 1") + "<br>success rate " + (isNaN(S.sr[o]) ? "–" : pc(S.sr[o])) + (S.act[o] === 1 ? "<br><b>raise</b>" : S.act[o] === -1 ? "<br><b>cut</b>" : ""); } });
+      tipRows: function (i) { var hd = "<b>Age " + exAges[i] + " on Jan 1</b>", bal = "<br>portfolio Jan 1 " + fmFull(prt[i]) + (i === 0 ? " (today's portfolio)" : ""); if (i >= F + R) return hd + " · end of plan" + bal; if (i < F) return hd + " · returns from " + histYear(S.yrs[pi * S.N + i]) + penTag(i) + " · before retirement" + bal + "<br>deposit " + fmFull(S.preDeposit[i]) + dWhen + (isNaN(S.preLevel) ? "" : "<br>locked-in base level " + fmFull(S.preLevel)); i -= F; var o = pi * R + i; return hd + " · returns from " + histYear(S.yrs[pi * S.N + S.firstRet + i]) + penTag(F + i) + bal + "<br>income " + fmFull(S.income[o]) + "<br>withdrawal " + (state.wt === "end" ? "Dec 31" : "Jan 1") + "<br>success rate " + (isNaN(S.sr[o]) ? "–" : pc(S.sr[o])) + (S.act[o] === 1 ? "<br><b>raise</b>" : S.act[o] === -1 ? "<br><b>cut</b>" : ""); } });
     document.getElementById("te_" + m).innerHTML = "<table><thead><tr><th>Age (Jan 1)</th><th>Return year</th><th>Success</th><th>Action</th><th>Base level</th><th>Income</th><th>Dec 31 portfolio</th></tr></thead><tbody>" + rows.join("") + "</tbody></table>";
   });
 }
@@ -795,6 +810,7 @@ function renderAbout() {
   "<p><b>Conventions.</b> Everything is in today's dollars. Historical nominal returns are converted to real using CPI, and Social Security and spending rise with inflation. Returns are annual, the portfolio is rebalanced yearly, and the fee is taken from returns. Taxes are not modeled. A surplus (Social Security above spending) is reinvested. Social Security starts at the stated age while both spouses are alive. Survivor benefits are not modeled, since the planning age is fixed.</p>" +
   "<p><b>Ages and timing.</b> Ages are person 1's age on Jan 1, and each plan year is a calendar year. Every age you enter (retirement, Social Security, spending changes, lump sums) means Jan 1 of the year that person is that age, and each item applies for that whole year. Enter <i>Portfolio today</i> as the Dec 31 balance just before the first plan year; portfolio charts start at your current age with exactly that balance.</p>" +
   "<p><b>Deposit and withdrawal timing</b> (<code>dt</code>, <code>wt</code>). Each year's whole deposit or withdrawal happens on one day: Jan 1, before the year's return, or Dec 31, after it. Social Security and lump sums move with that year's deposit (before retirement) or withdrawal (in retirement). The defaults are the most conservative: deposits on Dec 31 earn no return in the year they are made, and withdrawals on Jan 1 forgo that year's return. Real deposits and withdrawals spread through the year fall between the two. Guardrail checks always happen on Jan 1, before that year's withdrawal. In tables, \"Dec 31 portfolio\" is after that year's return and any Dec 31 flow. The planner's \"Fails in year starting at age X\" means that year's withdrawal could not be covered.</p>" +
+  "<p><b>Real return penalty</b> (<code>rp</code>, <code>rpy</code>). In each of the first N plan years, counted from today, the penalty is added to the portfolio's real return after the fee: a 1% real year with a −0.75 penalty becomes 0.25%. The penalty is treated as your expectation, so it applies everywhere: the Planner backtest, the simulated returns, the starting spending level and every guardrail test, which assumes the penalty for whatever penalty years remain. Set it to 0 to turn it off.</p>" +
   "<p><b>Partial years.</b> Put amounts for part of a year in one of two places. A one-year spending change (e.g. <code>64-65:6000</code>) is counted as spending in income charts and tables. A lump sum (e.g. <code>64:-6000</code>) only changes the portfolio.</p>" +
   "<p><b>Quarterly runs.</b> The model always starts with a full calendar year, so true up to the coming Jan 1 at each check:</p><ol>" +
   "<li>Person 1 and 2 age = age on the coming Jan 1.</li>" +
