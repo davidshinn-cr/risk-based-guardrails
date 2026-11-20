@@ -516,13 +516,14 @@ function dataset() {
 
 /* ---------------- parse into engine params ---------------- */
 function num(k) { var v = parseFloat(String(state[k]).replace(/[$,\s]/g, "")); return isNaN(v) ? NaN : v; }
-function parseList(txt, allowRange) {
+function parseList(txt, allowRange, requireFiniteAmount) {
   var out = [], bad = [];
   String(txt || "").split(/[;,]\s*(?=\d)/).forEach(function (it) {
     it = it.trim(); if (!it) return;
     var m = it.match(/^(\d+)(?:\s*-\s*(\d+))?\s*:\s*([+-]?[\d.,_]+)\s*(%?)$/);
     if (!m || (m[2] && !allowRange)) { bad.push(it); return; }
     var amt = parseFloat(m[3].replace(/[,_]/g, ""));
+    if (requireFiniteAmount && !Number.isFinite(amt)) { bad.push(it); return; }
     out.push({ from: +m[1], to: m[2] ? +m[2] : null, amt: m[4] ? amt / 100 : amt, pct: !!m[4] });
   });
   return { items: out, bad: bad };
@@ -533,7 +534,7 @@ function engineParams() {
   var chg = parseList(state.chg, true), lump = parseList(state.lump, false);
   if (chg.bad.length) errs.push("Can't read spending change(s): " + chg.bad.join(", "));
   if (lump.bad.length || lump.items.some(function (x) { return x.pct; })) errs.push("Can't read lump sum(s): " + lump.bad.join(", "));
-  var dsch = parseList(state.dsch, true);
+  var dsch = parseList(state.dsch, true, true);
   if (dsch.bad.length) errs.push("Can't read deposit schedule entr(ies): " + dsch.bad.join(", "));
   if (dsch.items.some(function (x) { return x.pct; })) errs.push("Deposit schedule needs dollar amounts, not %.");
   if (dsch.items.some(function (x) { return x.to != null && x.to <= x.from; })) errs.push("Deposit schedule range must end after it starts (e.g. 45-50:20000).");
