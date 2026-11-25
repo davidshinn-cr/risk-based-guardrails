@@ -17,18 +17,31 @@ reviews:
       - name: No unannounced removals
         mode: error
         instructions: |
-          List every existing user-facing behavior this PR removes or disables: inputs and
-          settings, function parameters, terms in calculations, chart series, table columns,
-          help text and documentation paragraphs.
-          Fail if any item on that list is not named in a "Removals" section of the PR
-          description. Pass only when the list is empty or every item is named there.
+          Identify existing user-facing behaviors that this PR removes or disables:
+          inputs and settings, function parameters, terms in calculations, chart
+          series, table columns, help text and documentation paragraphs.
+          Pass if there are none. Otherwise, pass only if each removal is either:
+          - named in a "Removals" section of the PR description; or
+          - clearly covered by acceptance criteria in an issue referenced in the
+            PR description.
+          If the issue cannot be read or its criteria are unclear, do not rely on
+          it as evidence. Fail and identify any removal that lacks evidence.
       - name: No stale-copy overwrite
         mode: error
         instructions: |
-          Fail if the PR removes or reverses behavior introduced by an earlier pull request
-          merged into the base branch, unless the PR description references that pull request
-          and says the revert is intentional. Ordinary edits that preserve behavior, such as
-          variable renames, pass this check without a revert declaration.
+          Compare the PR with the current base branch. Identify existing behavior
+          affected by deleted or edited code, including inputs, outputs,
+          calculations and side effects.
+          Pass if the affected behavior is preserved, including by a rename,
+          refactor or code move. Do not treat a deleted line alone as a revert.
+          If behavior is removed or changed, pass only if either:
+          - the PR description identifies the behavior and states that the change
+            is intentional (a reference to the earlier PR helps but is not required); or
+          - an issue referenced in the PR description has acceptance criteria that
+            clearly cover that specific change.
+          If the diff cannot be read, or the evidence is insufficient to tell
+          whether behavior is preserved, fail, identify the affected code, and
+          request human review. Never pass based only on a summary.
   auto_approvals:
     enabled: true
     max_merge_risk: low
