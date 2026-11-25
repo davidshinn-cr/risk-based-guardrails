@@ -1,2 +1,34 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 inheritance: false
+reviews:
+  profile: assertive
+  fail_commit_status: true
+  auto_review:
+    enabled: true
+    drafts: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 0
+  pre_merge_checks:
+    issue_assessment:
+      mode: error
+    description:
+      mode: error
+    custom_checks:
+      - name: No unannounced removals
+        mode: error
+        instructions: |
+          List every existing user-facing behavior this PR removes or disables: inputs and
+          settings, function parameters, terms in calculations, chart series, table columns,
+          help text and documentation paragraphs.
+          Fail if any item on that list is not named in a "Removals" section of the PR
+          description. Pass only when the list is empty or every item is named there.
+      - name: No stale-copy overwrite
+        mode: error
+        instructions: |
+          Fail if the PR deletes or reverts lines that were added by a pull request merged
+          into the base branch earlier, unless the PR description names that earlier pull
+          request and says the revert is intentional. Pass otherwise.
+  auto_approvals:
+    enabled: true
+    max_merge_risk: low
+    approve_on_skipped_review: false
