@@ -126,6 +126,11 @@ var Engine = (function () {
     return out;
   }
 
+  // schedule entry amount at age g: flat, or linear from amt at age `from` to end at age `to`
+  function entryAmt(e, g) {
+    return e.end == null ? e.amt : e.amt + (e.end - e.amt) * (g - e.from) / (e.to - e.from);
+  }
+
   function buildScenario(p) {
     var N = p.pa1 - p.a1;
     if (p.a2 != null) N = Math.max(N, p.pa2 - p.a2);
@@ -157,7 +162,7 @@ var Engine = (function () {
         for (i = 0; i < p.chg.length; i++) {
           var ch = p.chg[i];
           if (g1 >= ch.from && (ch.to == null || g1 < ch.to)) {
-            if (ch.pct) pct += ch.amt; else dol += ch.amt;
+            if (ch.pct) pct += entryAmt(ch, g1); else dol += entryAmt(ch, g1);
           }
         }
         a[k] = Math.max(0, 1 + pct);
@@ -168,7 +173,7 @@ var Engine = (function () {
         var contrib = p.contrib * Math.pow(1 + p.cg, k);
         for (i = 0; i < dsch.length; i++) {
           var ds = dsch[i];
-          if (g1 >= ds.from && (ds.to == null || g1 < ds.to)) contrib = ds.amt;
+          if (g1 >= ds.from && (ds.to == null || g1 < ds.to)) contrib = entryAmt(ds, g1);
         }
         dep[k] = contrib;
         a[k] = 0;
@@ -392,14 +397,14 @@ var SCHEMA = [
   ["Portfolio & saving", [
     ["p", "Portfolio today $", "num", 600000, "Balance on Dec 31 just before the first plan year (true up to year-end). This is the first point on the portfolio charts."],
     ["c", "Annual deposit until retirement $", "num", 30000, "Base deposit, added once a year before retirement on the date set by deposit timing. Used for every year the schedule below doesn't cover."],
-    ["dsch", "Deposit schedule  AGE-AGE:$", "txt", "", "Varying deposits before retirement. AGE-AGE:$ = from the 1st age up to, not including, the 2nd; AGE:$ = from that age until retirement. Person 1 age on Jan 1. Replaces the base deposit for those years, as exact today's $ (no growth). Later entries win. e.g. 45-48:20000, 48:40000, 52-53:0"],
+    ["dsch", "Deposit schedule  AGE-AGE:$", "txt", "", "Varying deposits before retirement. AGE-AGE:$ = from the 1st age up to, not including, the 2nd; AGE:$ = from that age until retirement. Person 1 age on Jan 1. Replaces the base deposit for those years, as exact today's $ (no growth). AGE-AGE:$>$ ramps linearly from the 1st amount at the 1st age toward the 2nd amount at the excluded 2nd age. Later entries win. e.g. 45-48:20000, 48:40000, 52-53:0, 45-55:10000>40000"],
     ["dt", "Deposit timing (before retirement)", "sel", "end", [["end", "End of year (Dec 31) – conservative"], ["begin", "Start of year (Jan 1)"]]],
     ["cg", "Deposit real growth %/yr", "num", 0],
     ["lump", "Lump sums  age:$", "txt", "", "Person 1 age on Jan 1; applied with that year's deposit or withdrawal. Changes the portfolio only (not counted as income or spending). + inflow, − outflow. e.g. 60:-50000, 70:100000"],
   ]],
   ["Spending (today's $)", [
     ["s", "Annual spending $ (Planner)", "num", 70000, "Total spending, before Social Security. Portfolio covers the gap."],
-    ["chg", "Spending changes", "txt", "55-65:12000, 80:-10%", "AGE:$ or AGE-AGE:$ (from the 1st age up to, not including, the 2nd) or AGE:% of base level. Person 1 age on Jan 1. Counted as spending."],
+    ["chg", "Spending changes", "txt", "55-65:12000, 80:-10%", "AGE:$ or AGE-AGE:$ (from the 1st age up to, not including, the 2nd) or AGE:% of base level. AGE-AGE:$>$ (or %>%) ramps linearly from the 1st amount at the 1st age to the 2nd amount at the 2nd age, e.g. 55-75:50000>0. Person 1 age on Jan 1. Counted as spending."],
     ["tgt", "Planner target success %", "num", 80],
     ["wt", "Withdrawal timing (in retirement)", "sel", "begin", [["begin", "Start of year (Jan 1) – conservative"], ["end", "End of year (Dec 31)"]]],
   ]],
@@ -516,16 +521,25 @@ function dataset() {
 
 /* ---------------- parse into engine params ---------------- */
 function num(k) { var v = parseFloat(String(state[k]).replace(/[$,\s]/g, "")); return isNaN(v) ? NaN : v; }
+var LIST_AMT = "([+-]?(?:(?:\\d{1,3}(?:,\\d{3})+|\\d(?:_?\\d)*)(?:\\.(?:\\d(?:_?\\d)*)?)?|\\.\\d(?:_?\\d)*))\\s*(%?)";
+var LIST_RE = new RegExp("^(\\d+)(?:\\s*-\\s*(\\d+))?\\s*:\\s*" + LIST_AMT + "(?:\\s*>\\s*" + LIST_AMT + ")?$");
 function parseList(txt, allowRange, requireFiniteAmount) {
   var out = [], bad = [];
   // A comma starts a new entry only when followed by an age or range and a colon.
   String(txt || "").split(/;|,\s*(?=\d+(?:\s*-\s*\d+)?\s*:)/).forEach(function (it) {
     it = it.trim(); if (!it) return;
-    var m = it.match(/^(\d+)(?:\s*-\s*(\d+))?\s*:\s*([+-]?(?:(?:\d{1,3}(?:,\d{3})+|\d(?:_?\d)*)(?:\.(?:\d(?:_?\d)*)?)?|\.\d(?:_?\d)*))\s*(%?)$/);
+    // AGE[-AGE]:AMT[%], or a linear ramp AGE-AGE:START[%]>END[%]
+    var m = it.match(LIST_RE);
     if (!m || (m[2] && !allowRange)) { bad.push(it); return; }
-    var amt = parseFloat(m[3].replace(/[,_]/g, ""));
+    var amt = parseFloat(m[3].replace(/[,_]/g, "")), end = null;
     if (requireFiniteAmount && !Number.isFinite(amt)) { bad.push(it); return; }
-    out.push({ from: +m[1], to: m[2] ? +m[2] : null, amt: m[4] ? amt / 100 : amt, pct: !!m[4] });
+    if (m[5] != null) {
+      end = parseFloat(m[5].replace(/[,_]/g, ""));
+      // a ramp needs a closed range that ends after it starts, and both endpoints in $ or both in %
+      if (!m[2] || +m[2] <= +m[1] || !!m[4] !== !!m[6] || (requireFiniteAmount && !Number.isFinite(end))) { bad.push(it); return; }
+      if (m[4]) end /= 100;
+    }
+    out.push({ from: +m[1], to: m[2] ? +m[2] : null, amt: m[4] ? amt / 100 : amt, end: end, pct: !!m[4] });
   });
   return { items: out, bad: bad };
 }
@@ -534,7 +548,7 @@ function engineParams() {
   var single = String(state.a2).trim() === "";
   var chg = parseList(state.chg, true), lump = parseList(state.lump, false);
   if (chg.bad.length) errs.push("Can't read spending change(s): " + chg.bad.join(", "));
-  if (lump.bad.length || lump.items.some(function (x) { return x.pct; })) errs.push("Can't read lump sum(s): " + lump.bad.join(", "));
+  if (lump.bad.length || lump.items.some(function (x) { return x.pct || x.end != null; })) errs.push("Can't read lump sum(s): " + lump.bad.join(", "));
   var dsch = parseList(state.dsch, true, true);
   if (dsch.bad.length) errs.push("Can't read deposit schedule entr(ies): " + dsch.bad.join(", "));
   if (dsch.items.some(function (x) { return x.pct; })) errs.push("Deposit schedule needs dollar amounts, not %.");
@@ -837,7 +851,7 @@ function histYear(i) { return CUR_DATA[i] ? CUR_DATA[i].year : "?"; }
 /* ---------------- about ---------------- */
 function renderAbout() {
   document.getElementById("out-about").innerHTML = '<div class="card" style="max-width:860px"><h3>How it works</h3>' +
-  "<p><b>Planner.</b> Works like FI Calc's backtest, starting today. Every historical period as long as your horizon (today until both of you reach your planning ages) is replayed: deposits until retirement, then spending minus Social Security drawn from the portfolio at the start of each year. Spending changes and lump sums apply at person 1's age. The <i>success rate</i> is the share of periods that never run out. Because the plan is linear in spending and in starting portfolio, the tool solves exactly for (a) the highest base spending that hits your target success rate and (b) the starting portfolio needed for your spending at that rate.</p>" +
+  "<p><b>Planner.</b> Works like FI Calc's backtest, starting today. Every historical period as long as your horizon (today until both of you reach your planning ages) is replayed: deposits until retirement, then spending minus Social Security drawn from the portfolio at the start of each year. Spending changes and lump sums apply at person 1's age. A spending change like <code>55-75:50000&gt;0</code> ramps linearly: 50,000 at 55, 47,500 at 56, … 2,500 at 74, and nothing from 75. The <i>success rate</i> is the share of periods that never run out. Because the plan is linear in spending and in starting portfolio, the tool solves exactly for (a) the highest base spending that hits your target success rate and (b) the starting portfolio needed for your spending at that rate.</p>" +
   "<p><b>Guardrails simulation</b> (risk-based guardrails, Kitces / Income Lab, 2024 parameters by default). Each simulated life gets its own sequence of real returns, built either by splicing random historical blocks or by taking one whole historical period. Each year of retirement:</p><ol>" +
   "<li>Ages, years remaining, Social Security start dates and planned spending changes are all moved forward.</li>" +
   "<li>The remaining plan, at the current spending level, is backtested over every historical period of the remaining length. This gives the current success rate.</li>" +
@@ -848,7 +862,7 @@ function renderAbout() {
   "<p><b>Conventions.</b> Everything is in today's dollars. Historical nominal returns are converted to real using CPI, and Social Security and spending rise with inflation. Returns are annual, the portfolio is rebalanced yearly, and the fee is taken from returns. Taxes are not modeled. A surplus (Social Security above spending) is reinvested. Social Security starts at the stated age while both spouses are alive. Survivor benefits are not modeled, since the planning age is fixed.</p>" +
   "<p><b>Ages and timing.</b> Ages are person 1's age on Jan 1, and each plan year is a calendar year. Every age you enter (retirement, Social Security, spending changes, lump sums) means Jan 1 of the year that person is that age, and each item applies for that whole year. Enter <i>Portfolio today</i> as the Dec 31 balance just before the first plan year; portfolio charts start at your current age with exactly that balance.</p>" +
   "<p><b>Deposit and withdrawal timing</b> (<code>dt</code>, <code>wt</code>). Each year's whole deposit or withdrawal happens on one day: Jan 1, before the year's return, or Dec 31, after it. Social Security and lump sums move with that year's deposit (before retirement) or withdrawal (in retirement). The defaults are the most conservative: deposits on Dec 31 earn no return in the year they are made, and withdrawals on Jan 1 forgo that year's return. Real deposits and withdrawals spread through the year fall between the two. Guardrail checks always happen on Jan 1, before that year's withdrawal. In tables, \"Dec 31 portfolio\" is after that year's return and any Dec 31 flow. The planner's \"Fails in year starting at age X\" means that year's withdrawal could not be covered.</p>" +
-  "<p><b>Deposits</b> (<code>c</code>, <code>cg</code>, <code>dsch</code>). Before retirement, each year's deposit is the base deposit <code>c</code>, grown by <code>cg</code> real per year, unless the deposit schedule covers that year. A schedule entry replaces the base deposit with exactly the amount given, in today's dollars, with no growth. <code>45-48:20000</code> covers ages 45, 46 and 47. <code>48:40000</code> covers age 48 until retirement. <code>52-53:0</code> skips the year starting at age 52. When entries overlap, the later one wins. To use only the schedule, set <code>c</code> to 0. Portfolio charts show each year's deposit plus lump sums as a bar at the bottom, on its own scale; outflows are red. The dashed line is the money put in so far: today's portfolio plus all deposits and lump sums to date. The gap between it and the portfolio is growth, or, after retirement, growth minus withdrawals.</p>" +
+  "<p><b>Deposits</b> (<code>c</code>, <code>cg</code>, <code>dsch</code>). Before retirement, each year's deposit is the base deposit <code>c</code>, grown by <code>cg</code> real per year, unless the deposit schedule covers that year. A schedule entry replaces the base deposit with exactly the amount given, in today's dollars, with no growth. <code>45-48:20000</code> covers ages 45, 46 and 47. <code>48:40000</code> covers age 48 until retirement. <code>52-53:0</code> skips the year starting at age 52. <code>45-55:10000&gt;40000</code> ramps linearly from 10,000 at 45 to 37,000 at 54; it excludes age 55. At 55, the base deposit resumes if still before retirement and no other entry applies. When entries overlap, the later one wins. To use only the schedule, set <code>c</code> to 0. Portfolio charts show each year's deposit plus lump sums as a bar at the bottom, on its own scale; outflows are red. The dashed line is the money put in so far: today's portfolio plus all deposits and lump sums to date. The gap between it and the portfolio is growth, or, after retirement, growth minus withdrawals.</p>" +
   "<p><b>Partial years.</b> Put amounts for part of a year in one of two places. A one-year spending change (e.g. <code>64-65:6000</code>) is counted as spending in income charts and tables. A lump sum (e.g. <code>64:-6000</code>) only changes the portfolio.</p>" +
   "<p><b>Quarterly runs.</b> The model always starts with a full calendar year, so true up to the coming Jan 1 at each check:</p><ol>" +
   "<li>Person 1 and 2 age = age on the coming Jan 1.</li>" +
