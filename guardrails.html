@@ -184,6 +184,16 @@ var Engine = (function () {
     return { N: N, mh: mh, Next: Next, a: a, c: c, dchg: dchg, inc: inc, retired: retired, tEnd: tEnd, pen: pen, firstRet: firstRet, age1: age1, age2: age2, dep: dep, lumpA: lumpA };
   }
 
+  function penaltyError(sc, r) {
+    var pen = sc.pen[0]; // The same adjustment applies in every penalty year.
+    if (!pen) return null;
+    for (var i = 0; i < r.length; i++) {
+      var growth = 1 + r[i] + pen;
+      if (!Number.isFinite(growth) || growth <= 0) return "Adjust the real return penalty so every selected historical return after fees and the penalty is finite and above −100%.";
+    }
+    return null;
+  }
+
   // critical spending level for one historical sequence starting at hist index s,
   // from scenario year k with portfolio P, horizon H = N - k
   function hz(k, sc) { return Math.max(sc.N - k, sc.mh); }
@@ -241,6 +251,8 @@ var Engine = (function () {
     var sc = buildScenario(p);
     var Y = r.length;
     if (hz(0, sc) > Y) return { error: "Horizon of " + sc.N + " years exceeds " + Y + " years of data." };
+    var error = penaltyError(sc, r);
+    if (error) return { error: error };
     var n = nSeq(Y, hz(0, sc));
     var buf = new Float64Array(n);
     distL(p.p0, 0, sc, r, buf);
@@ -302,6 +314,8 @@ var Engine = (function () {
     if (sc.firstRet < 0) return { error: "Retirement age is after the planning horizon." };
     var H0 = mode === "today" ? hz(0, sc) : hz(sc.firstRet, sc);
     if (H0 > Y) return { error: "Backtest horizon of " + H0 + " years exceeds " + Y + " years of data." };
+    var error = penaltyError(sc, r);
+    if (error) return { error: error };
     var R = N - sc.firstRet; // retirement years
     var n = p.n;
     var buf = new Float64Array(Y);
