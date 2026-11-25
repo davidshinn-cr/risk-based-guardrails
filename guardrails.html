@@ -518,9 +518,10 @@ function dataset() {
 function num(k) { var v = parseFloat(String(state[k]).replace(/[$,\s]/g, "")); return isNaN(v) ? NaN : v; }
 function parseList(txt, allowRange, requireFiniteAmount) {
   var out = [], bad = [];
-  String(txt || "").split(/[;,]\s*(?=\d)/).forEach(function (it) {
+  // A comma starts a new entry only when followed by an age or range and a colon.
+  String(txt || "").split(/;|,\s*(?=\d+(?:\s*-\s*\d+)?\s*:)/).forEach(function (it) {
     it = it.trim(); if (!it) return;
-    var m = it.match(/^(\d+)(?:\s*-\s*(\d+))?\s*:\s*([+-]?[\d.,_]+)\s*(%?)$/);
+    var m = it.match(/^(\d+)(?:\s*-\s*(\d+))?\s*:\s*([+-]?(?:(?:\d{1,3}(?:,\d{3})+|\d(?:_?\d)*)(?:\.(?:\d(?:_?\d)*)?)?|\.\d(?:_?\d)*))\s*(%?)$/);
     if (!m || (m[2] && !allowRange)) { bad.push(it); return; }
     var amt = parseFloat(m[3].replace(/[,_]/g, ""));
     if (requireFiniteAmount && !Number.isFinite(amt)) { bad.push(it); return; }
