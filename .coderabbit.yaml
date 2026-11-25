@@ -25,9 +25,10 @@ reviews:
       - name: No stale-copy overwrite
         mode: error
         instructions: |
-          Fail if the PR deletes or reverts lines that were added by a pull request merged
-          into the base branch earlier, unless the PR description names that earlier pull
-          request and says the revert is intentional. Pass otherwise.
+          Fail if the PR removes or reverses behavior introduced by an earlier pull request
+          merged into the base branch, unless the PR description references that pull request
+          and says the revert is intentional. Ordinary edits that preserve behavior, such as
+          variable renames, pass this check without a revert declaration.
   auto_approvals:
     enabled: true
     max_merge_risk: low
